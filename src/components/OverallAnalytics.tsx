@@ -2,16 +2,18 @@ import React from 'react';
 import { TrendingUp, Award, Target, Users } from 'lucide-react';
 import { EmployeeStats } from '../types';
 import { DynamoService } from '../services/dynamoService';
+import { TicketData } from '../types';
 
 interface OverallAnalyticsProps {
   employeeStats: EmployeeStats[];
+  tickets: TicketData[];
 }
 
-export const OverallAnalytics: React.FC<OverallAnalyticsProps> = ({ employeeStats }) => {
+export const OverallAnalytics: React.FC<OverallAnalyticsProps> = ({ employeeStats , tickets }) => {
   const totalTickets = employeeStats.reduce((sum, emp) => sum + emp.total_tickets, 0);
   const totalViolations = employeeStats.reduce((sum, emp) => sum + emp.sla_violations, 0);
-  const slaCompliance = ((totalTickets - totalViolations) / totalTickets) * 100;
-  
+  const slaCompliance = DynamoService.calculateSLACompliance(tickets);
+
   const topPerformers = employeeStats
     .map(emp => ({
       ...emp,

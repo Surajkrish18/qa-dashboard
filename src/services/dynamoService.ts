@@ -18,6 +18,34 @@ export class DynamoService {
     }
   }
 
+  static calculateSLACompliance(tickets: TicketData[]): number {
+    const interactions = tickets.flatMap(ticket => {
+      if (!ticket.response_times || !Array.isArray(ticket.response_times)) return [];
+      return ticket.response_times
+        .filter(response => response.response_type === 'Employee to Client')
+        .map(response => {
+          const responseTime = DynamoService.parseResponseTime(response.response_time);
+          return {
+            is_violation: responseTime > 30
+          };
+        });
+    });
+
+    const totalInteractions = interactions.length;
+    const violations = interactions.filter(i => i.is_violation).length;
+    const compliancePercentage = totalInteractions > 0
+      ? ((totalInteractions - violations) / totalInteractions) * 100
+      : 0;
+
+    return compliancePercentage;
+  }
+
+  static parseResponseTime(responseTimeStr: string): number {
+    if (!responseTimeStr || !responseTimeStr.includes(':')) return 0;
+    const [hours, minutes] = responseTimeStr.split(':').map(Number);
+    return hours * 60 + minutes;
+  }
+
   // Fetch tickets for a specific employee
   static async getTicketsByEmployee(employee: string): Promise<TicketData[]> {
     try {

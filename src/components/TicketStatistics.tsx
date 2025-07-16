@@ -1,5 +1,5 @@
 import React from 'react';
-import { Ticket, Clock, CheckCircle, AlertCircle } from 'lucide-react';
+import { Ticket, Clock, Users, TrendingUp, MessageSquare } from 'lucide-react';
 import { TicketData } from '../types';
 
 interface TicketStatisticsProps {
@@ -13,24 +13,28 @@ export const TicketStatistics: React.FC<TicketStatisticsProps> = ({ tickets }) =
   }, {} as Record<string, number>);
 
   const uniqueTickets = [...new Set(tickets.map(t => t.ticket_id))];
-  const avgScores = tickets.reduce((acc, ticket) => {
-    const scores = [
-      ticket.client_alignment,
-      ticket.consistency,
-      ticket.empathy,
-      ticket.enablement,
-      ticket.grammar_language,
-      ticket.non_tech_clarity,
-      ticket.ownership_accountability,
-      ticket.proactivity,
-      ticket.professionalism_clarity,
-      ticket.responsiveness,
-      ticket.risk_impact,
-      ticket.tone_and_trust
-    ];
-    const avgScore = scores.reduce((sum, score) => sum + score, 0) / scores.length;
-    return acc + avgScore;
-  }, 0) / tickets.length;
+  
+  // Calculate interactions per ticket
+  const interactionsPerTicket = tickets.length / uniqueTickets.length;
+  
+  // Calculate unique employees
+  const uniqueEmployees = [...new Set(tickets.map(t => t.employee))];
+  
+  // Calculate most active employee
+  const employeeTicketCounts = tickets.reduce((acc, ticket) => {
+    acc[ticket.employee] = (acc[ticket.employee] || 0) + 1;
+    return acc;
+  }, {} as Record<string, number>);
+  
+  const mostActiveEmployee = Object.entries(employeeTicketCounts)
+    .sort(([,a], [,b]) => b - a)[0];
+  
+  // Calculate recent activity (last 7 days)
+  const sevenDaysAgo = new Date();
+  sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+  const recentTickets = tickets.filter(ticket => 
+    new Date(ticket.created_date) >= sevenDaysAgo
+  );
 
   return (
     <div className="bg-gray-800 rounded-lg p-6 border border-gray-700">
@@ -51,39 +55,84 @@ export const TicketStatistics: React.FC<TicketStatisticsProps> = ({ tickets }) =
             <span className="text-white font-semibold">{uniqueTickets.length}</span>
           </div>
           <div className="flex items-center justify-between p-3 bg-gray-700/50 rounded-lg">
-            <span className="text-gray-300">Average QA Score</span>
-	    <span className="text-green-400 font-semibold">{avgScores.toFixed(1)}</span>
+            <span className="text-gray-300">Interactions per Ticket</span>
+            <span className="text-blue-400 font-semibold">{interactionsPerTicket.toFixed(1)}</span>
+          </div>
+          <div className="flex items-center justify-between p-3 bg-gray-700/50 rounded-lg">
+            <span className="text-gray-300">Active Employees</span>
+            <span className="text-purple-400 font-semibold">{uniqueEmployees.length}</span>
           </div>
         </div>
         
-        {/* Sentiment Distribution */}
+        {/* Enhanced Analytics */}
         <div className="space-y-4">
-          <h4 className="font-medium text-white">Sentiment Distribution</h4>
-          {Object.entries(sentimentStats).map(([sentiment, count]) => (
-            <div key={sentiment} className="flex items-center justify-between">
+          <h4 className="font-medium text-white flex items-center">
+            <TrendingUp className="h-4 w-4 mr-2 text-green-400" />
+            Activity Insights
+          </h4>
+          
+          {/* Most Active Employee */}
+          <div className="bg-blue-500/10 rounded-lg p-3 border border-blue-500/20">
+            <div className="flex items-center justify-between">
               <div className="flex items-center space-x-2">
-                <div className={`w-3 h-3 rounded-full ${
-                  sentiment === 'positive' ? 'bg-green-500' :
-                  sentiment === 'negative' ? 'bg-red-500' :
-                  sentiment === 'neutral' ? 'bg-gray-500' : 'bg-yellow-500'
-                }`} />
-                <span className="text-gray-300 capitalize">{sentiment}</span>
+                <Users className="h-4 w-4 text-blue-400" />
+                <span className="text-blue-400 text-sm">Most Active Employee</span>
               </div>
+              <div className="text-right">
+                <div className="text-white font-medium">{mostActiveEmployee?.[0] || 'N/A'}</div>
+                <div className="text-blue-400 text-xs">{mostActiveEmployee?.[1] || 0} interactions</div>
+              </div>
+            </div>
+          </div>
+          
+          {/* Recent Activity */}
+          <div className="bg-green-500/10 rounded-lg p-3 border border-green-500/20">
+            <div className="flex items-center justify-between">
               <div className="flex items-center space-x-2">
-                <div className="w-20 bg-gray-700 rounded-full h-2">
-                  <div 
-                    className={`h-2 rounded-full ${
+                <Clock className="h-4 w-4 text-green-400" />
+                <span className="text-green-400 text-sm">Last 7 Days Activity</span>
+              </div>
+              <div className="text-right">
+                <div className="text-white font-medium">{recentTickets.length}</div>
+                <div className="text-green-400 text-xs">interactions</div>
+              </div>
+            </div>
+          </div>
+          
+          {/* Sentiment Distribution */}
+          <div>
+            <h5 className="font-medium text-white mb-2 flex items-center">
+              <MessageSquare className="h-4 w-4 mr-2 text-yellow-400" />
+              Sentiment Distribution
+            </h5>
+            <div className="space-y-2">
+              {Object.entries(sentimentStats).map(([sentiment, count]) => (
+                <div key={sentiment} className="flex items-center justify-between">
+                  <div className="flex items-center space-x-2">
+                    <div className={`w-3 h-3 rounded-full ${
                       sentiment === 'positive' ? 'bg-green-500' :
                       sentiment === 'negative' ? 'bg-red-500' :
                       sentiment === 'neutral' ? 'bg-gray-500' : 'bg-yellow-500'
-                    }`}
-                    style={{ width: `${(count / tickets.length) * 100}%` }}
-                  />
+                    }`} />
+                    <span className="text-gray-300 capitalize">{sentiment}</span>
+                  </div>
+                  <div className="flex items-center space-x-2">
+                    <div className="w-20 bg-gray-700 rounded-full h-2">
+                      <div 
+                        className={`h-2 rounded-full ${
+                          sentiment === 'positive' ? 'bg-green-500' :
+                          sentiment === 'negative' ? 'bg-red-500' :
+                          sentiment === 'neutral' ? 'bg-gray-500' : 'bg-yellow-500'
+                        }`}
+                        style={{ width: `${(count / tickets.length) * 100}%` }}
+                      />
+                    </div>
+                    <span className="text-sm text-gray-400">{count}</span>
+                  </div>
                 </div>
-                <span className="text-sm text-gray-400">{count}</span>
-              </div>
+              ))}
             </div>
-          ))}
+          </div>
         </div>
       </div>
     </div>

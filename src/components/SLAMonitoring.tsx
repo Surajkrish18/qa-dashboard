@@ -1,13 +1,100 @@
-import React from 'react';
-import { AlertTriangle, Clock, XCircle } from 'lucide-react';
-import { SLAViolation } from '../types';
+import React, { useState } from 'react';
+import { AlertTriangle, Clock, XCircle, CheckCircle, User, Calendar, Filter } from 'lucide-react';
+import { SLAViolation, TicketData } from '../types';
+import { DynamoService } from '../services/dynamoService';
 
 interface SLAMonitoringProps {
   violations: SLAViolation[];
+  tickets: TicketData[];
 }
 
-export const SLAMonitoring: React.FC<SLAMonitoringProps> = ({ violations }) => {
-  const initialResponseViolations = violations;
+interface SLAInteraction {
+  ticket_id: string;
+  employee: string;
+  response_time: number;
+  response_type: string;
+  created_date: string;
+  is_violation: boolean;
+  sla_limit: number;
+}
+
+export const SLAMonitoring: React.FC<SLAMonitoringProps> = ({ violations, tickets }) => {
+  const [activeTab, setActiveTab] = useState<'violations' | 'compliant' | 'all'>('all');
+  const [selectedEmployee, setSelectedEmployee] = useState<string>('all');
+
+  // Calculate all SLA interactions (both violations and compliant)
+  const getAllSLAInteractions = (): SLAInteraction[] => {
+    const interactions: SLAInteraction[] = [];
+    
+    tickets.forEach(ticket => {
+      if (!ticket.response_times || !Array.isArray(ticket.response_times)) {
+        return;
+      }
+      
+      // Filter for "Employee to Client" responses only
+      const employeeResponses = ticket.response_times.filter(
+        response => response.response_type === 'Employee to Client'
+      );
+      
+      employeeResponses.forEach(response => {
+        const responseTime = DynamoService.parseResponseTime(response.response_time);
+        const slaLimit = 30; // 30 minutes SLA
+        
+        interactions.push({
+          ticket_id: ticket.ticket_id,
+          employee: response.response_by,
+          response_time: responseTime,
+          response_type: response.response_type,
+          created_date: ticket.created_date,
+          is_violation: responseTime > slaLimit,
+          sla_limit: slaLimit
+        });
+      });
+    });
+
+    return interactions.sort((a, b) => new Date(b.created_date).getTime() - new Date(a.created_date).getTime());
+  };
+
+  const allInteractions = getAllSLAInteractions();
+  const violationInteractions = allInteractions.filter(interaction => interaction.is_violation);
+  const compliantInteractions = allInteractions.filter(interaction => !interaction.is_violation);
+  
+  // Calculate percentages
+  const totalInteractions = allInteractions.length;
+  const violationPercentage = totalInteractions > 0 ? (violationInteractions.length / totalInteractions) * 100 : 0;
+  const compliancePercentage = 100 - violationPercentage;
+
+  // Get unique employees for filter
+  const uniqueEmployees = [...new Set(allInteractions.map(interaction => interaction.employee))].sort();
+
+  // Filter interactions based on active tab and selected employee
+  const getFilteredInteractions = () => {
+    let filtered = allInteractions;
+    
+    if (activeTab === 'violations') {
+      filtered = violationInteractions;
+    } else if (activeTab === 'compliant') {
+      filtered = compliantInteractions;
+    }
+    
+    if (selectedEmployee !== 'all') {
+      filtered = filtered.filter(interaction => interaction.employee === selectedEmployee);
+    }
+    
+    return filtered;
+  };
+
+  const filteredInteractions = getFilteredInteractions();
+
+  const getResponseTimeColor = (responseTime: number, slaLimit: number) => {
+    return responseTime <= slaLimit ? 'text-green-400' : 'text-red-400';
+  };
+
+  const getResponseTimeBg = (responseTime: number, slaLimit: number) => {
+    return responseTime <= slaLimit 
+      ? 'bg-green-500/10 border-green-500/20' 
+      : 'bg-red-500/10 border-red-500/20';
+  };
 
   return (
     <div className="space-y-6">
@@ -18,24 +105,51 @@ export const SLAMonitoring: React.FC<SLAMonitoringProps> = ({ violations }) => {
           SLA Monitoring Dashboard
         </h3>
         
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
+          <div className="bg-blue-500/10 rounded-lg p-4 border border-blue-500/20">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-blue-400 text-sm">Total Interactions</p>
+                <p className="text-2xl font-bold text-white">{totalInteractions}</p>
+              </div>
+              <Clock className="h-8 w-8 text-blue-400" />
+            </div>
+          </div>
+          
           <div className="bg-red-500/10 rounded-lg p-4 border border-red-500/20">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-red-400 text-sm">Total Violations</p>
-                <p className="text-2xl font-bold text-white">{violations.length}</p>
+                <p className="text-red-400 text-sm">SLA Violations</p>
+                <p className="text-2xl font-bold text-white">{violationInteractions.length}</p>
+                <p className="text-red-400 text-xs">{violationPercentage.toFixed(1)}%</p>
               </div>
               <XCircle className="h-8 w-8 text-red-400" />
             </div>
           </div>
           
-          <div className="bg-yellow-500/10 rounded-lg p-4 border border-yellow-500/20">
+          <div className="bg-green-500/10 rounded-lg p-4 border border-green-500/20">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-yellow-400 text-sm">Response Time Violations</p>
-                <p className="text-2xl font-bold text-white">{initialResponseViolations.length}</p>
+                <p className="text-green-400 text-sm">SLA Compliant</p>
+                <p className="text-2xl font-bold text-white">{compliantInteractions.length}</p>
+                <p className="text-green-400 text-xs">{compliancePercentage.toFixed(1)}%</p>
               </div>
-              <Clock className="h-8 w-8 text-yellow-400" />
+              <CheckCircle className="h-8 w-8 text-green-400" />
+            </div>
+          </div>
+          
+          <div className="bg-purple-500/10 rounded-lg p-4 border border-purple-500/20">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-purple-400 text-sm">Avg Response Time</p>
+                <p className="text-2xl font-bold text-white">
+                  {totalInteractions > 0 
+                    ? (allInteractions.reduce((sum, interaction) => sum + interaction.response_time, 0) / totalInteractions).toFixed(0)
+                    : '0'
+                  }m
+                </p>
+              </div>
+              <Clock className="h-8 w-8 text-purple-400" />
             </div>
           </div>
         </div>
@@ -46,60 +160,202 @@ export const SLAMonitoring: React.FC<SLAMonitoringProps> = ({ violations }) => {
           <div className="space-y-2 text-sm">
             <div className="flex items-center justify-between">
               <span className="text-gray-300">Initial Response Time</span>
-              <span className="text-blue-400 font-medium">≤ 30 minutes (Employee to Client)</span>
+              <span className="text-blue-400 font-medium">&le; 30 minutes (Employee to Client)</span>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
+              <div className="flex items-center space-x-2">
+                <div className="w-3 h-3 bg-green-500 rounded-full"></div>
+                <span className="text-green-400 text-xs">SLA Met: &le;30 min</span>
+              </div>
+              <div className="flex items-center space-x-2">
+                <div className="w-3 h-3 bg-red-500 rounded-full"></div>
+                <span className="text-red-400 text-xs">Violation: &gt;30 min</span>
+              </div>
             </div>
           </div>
         </div>
       </div>
       
-      {/* Violations List */}
+      {/* Filters and Tabs */}
       <div className="bg-gray-800 rounded-lg p-6 border border-gray-700">
-        <h3 className="text-lg font-semibold mb-4">Employee Response Time Violations</h3>
+        <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between mb-6 space-y-4 lg:space-y-0">
+          <h3 className="text-lg font-semibold">Detailed SLA Interactions</h3>
+          
+          <div className="flex flex-col sm:flex-row space-y-2 sm:space-y-0 sm:space-x-4">
+            {/* Employee Filter */}
+            <div className="flex items-center space-x-2">
+              <Filter className="h-4 w-4 text-gray-400" />
+              <select
+                value={selectedEmployee}
+                onChange={(e) => setSelectedEmployee(e.target.value)}
+                className="bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              >
+                <option value="all">All Employees</option>
+                {uniqueEmployees.map(employee => (
+                  <option key={employee} value={employee}>{employee}</option>
+                ))}
+              </select>
+            </div>
+            
+            {/* Tab Buttons */}
+            <div className="flex space-x-1 bg-gray-700 p-1 rounded-lg">
+              <button
+                onClick={() => setActiveTab('all')}
+                className={`px-3 py-1 rounded text-sm transition-colors ${
+                  activeTab === 'all'
+                    ? 'bg-blue-600 text-white'
+                    : 'text-gray-400 hover:text-white'
+                }`}
+              >
+                All ({totalInteractions})
+              </button>
+              <button
+                onClick={() => setActiveTab('violations')}
+                className={`px-3 py-1 rounded text-sm transition-colors ${
+                  activeTab === 'violations'
+                    ? 'bg-red-600 text-white'
+                    : 'text-gray-400 hover:text-white'
+                }`}
+              >
+                Violations ({violationInteractions.length})
+              </button>
+              <button
+                onClick={() => setActiveTab('compliant')}
+                className={`px-3 py-1 rounded text-sm transition-colors ${
+                  activeTab === 'compliant'
+                    ? 'bg-green-600 text-white'
+                    : 'text-gray-400 hover:text-white'
+                }`}
+              >
+                Compliant ({compliantInteractions.length})
+              </button>
+            </div>
+          </div>
+        </div>
         
+        {/* Interactions List */}
         <div className="space-y-4">
-          {violations.length === 0 ? (
+          {filteredInteractions.length === 0 ? (
             <div className="text-center py-8 text-gray-400">
               <Clock className="h-12 w-12 mx-auto mb-4 opacity-50" />
-              <p>No SLA violations found</p>
+              <p>No interactions found for the selected filters</p>
             </div>
           ) : (
-            violations.map((violation, index) => (
-              <div key={index} className="bg-gray-700/50 rounded-lg p-4 border border-gray-600">
-                <div className="flex items-center justify-between mb-2">
-                  <div className="flex items-center space-x-2">
-                    <AlertTriangle className="h-5 w-5 text-red-400" />
-                    <span className="font-medium text-white">{violation.ticket_id}</span>
-                    <span className="px-2 py-1 rounded text-xs font-medium bg-yellow-500/20 text-yellow-400">
-                      Response Time
-                    </span>
+            filteredInteractions.map((interaction, index) => (
+              <div 
+                key={`${interaction.ticket_id}-${interaction.employee}-${index}`} 
+                className={`rounded-lg p-4 border ${getResponseTimeBg(interaction.response_time, interaction.sla_limit)}`}
+              >
+                <div className="flex items-center justify-between mb-3">
+                  <div className="flex items-center space-x-3">
+                    <div className="flex items-center space-x-2">
+                      {interaction.is_violation ? (
+                        <XCircle className="h-5 w-5 text-red-400" />
+                      ) : (
+                        <CheckCircle className="h-5 w-5 text-green-400" />
+                      )}
+                      <span className="font-medium text-white">{interaction.ticket_id}</span>
+                    </div>
+                    <div className={`px-2 py-1 rounded text-xs font-medium ${
+                      interaction.is_violation 
+                        ? 'bg-red-500/20 text-red-400' 
+                        : 'bg-green-500/20 text-green-400'
+                    }`}>
+                      {interaction.is_violation ? 'SLA VIOLATION' : 'SLA COMPLIANT'}
+                    </div>
                   </div>
-                  <span className="text-gray-400 text-sm">
-                    {new Date(violation.created_date).toLocaleDateString()}
-                  </span>
+                  <div className="flex items-center space-x-2 text-sm text-gray-400">
+                    <Calendar className="h-4 w-4" />
+                    <span>{new Date(interaction.created_date).toLocaleDateString()}</span>
+                  </div>
                 </div>
                 
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
-                  <div>
-                    <span className="text-gray-400">Employee: </span>
-                    <span className="text-white">{violation.employee}</span>
+                <div className="grid grid-cols-1 md:grid-cols-4 gap-4 text-sm">
+                  <div className="flex items-center space-x-2">
+                    <User className="h-4 w-4 text-gray-400" />
+                    <div>
+                      <span className="text-gray-400">Employee: </span>
+                      <span className="text-white font-medium">{interaction.employee}</span>
+                    </div>
                   </div>
                   <div>
-                    <span className="text-gray-400">Actual Time: </span>
-                    <span className="text-red-400 font-medium">
-                      {violation.actual_time} minutes
+                    <span className="text-gray-400">Response Time: </span>
+                    <span className={`font-bold ${getResponseTimeColor(interaction.response_time, interaction.sla_limit)}`}>
+                      {interaction.response_time} minutes
                     </span>
                   </div>
                   <div>
                     <span className="text-gray-400">SLA Limit: </span>
                     <span className="text-blue-400 font-medium">
-                      {violation.sla_limit} minutes
+                      {interaction.sla_limit} minutes
                     </span>
+                  </div>
+                  <div>
+                    <span className="text-gray-400">Difference: </span>
+                    <span className={`font-medium ${
+                      interaction.response_time <= interaction.sla_limit 
+                        ? 'text-green-400' 
+                        : 'text-red-400'
+                    }`}>
+                      {interaction.response_time <= interaction.sla_limit ? '-' : '+'}
+                      {Math.abs(interaction.response_time - interaction.sla_limit)} min
+                    </span>
+                  </div>
+                </div>
+                
+                {/* Response Time Visual Indicator */}
+                <div className="mt-3">
+                  <div className="flex items-center justify-between text-xs text-gray-400 mb-1">
+                    <span>Response Time Progress</span>
+                    <span>{((interaction.response_time / (interaction.sla_limit * 1.5)) * 100).toFixed(0)}%</span>
+                  </div>
+                  <div className="w-full bg-gray-600 rounded-full h-2">
+                    <div 
+                      className={`h-2 rounded-full transition-all ${
+                        interaction.response_time <= interaction.sla_limit ? 'bg-green-500' : 'bg-red-500'
+                      }`}
+                      style={{ 
+                        width: `${Math.min(100, (interaction.response_time / (interaction.sla_limit * 1.5)) * 100)}%` 
+                      }}
+                    />
                   </div>
                 </div>
               </div>
             ))
           )}
         </div>
+        
+        {/* Summary Stats */}
+        {filteredInteractions.length > 0 && (
+          <div className="mt-6 grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div className="bg-gray-700/50 rounded-lg p-4">
+              <div className="flex items-center justify-between">
+                <span className="text-gray-300">Filtered Results</span>
+                <span className="text-white font-semibold">{filteredInteractions.length}</span>
+              </div>
+            </div>
+            <div className="bg-gray-700/50 rounded-lg p-4">
+              <div className="flex items-center justify-between">
+                <span className="text-gray-300">Avg Response Time</span>
+                <span className="text-white font-semibold">
+                  {(filteredInteractions.reduce((sum, interaction) => sum + interaction.response_time, 0) / filteredInteractions.length).toFixed(1)}m
+                </span>
+              </div>
+            </div>
+            <div className="bg-gray-700/50 rounded-lg p-4">
+              <div className="flex items-center justify-between">
+                <span className="text-gray-300">Violation Rate</span>
+                <span className={`font-semibold ${
+                  (filteredInteractions.filter(i => i.is_violation).length / filteredInteractions.length) * 100 > 10 
+                    ? 'text-red-400' 
+                    : 'text-green-400'
+                }`}>
+                  {((filteredInteractions.filter(i => i.is_violation).length / filteredInteractions.length) * 100).toFixed(1)}%
+                </span>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
