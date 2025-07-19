@@ -590,13 +590,7 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({ tickets, employeeSta
               <div className="flex justify-between">
                 <span className="text-gray-300">Unique Tickets:</span>
                 <span className="text-white font-medium">
-                  {[...new Set(tickets.filter(t => {
-                    const ticketDate = new Date(t.created_date);
-                    const weekStart = new Date(selectedWeek);
-                    const weekEnd = new Date(weekStart);
-                    weekEnd.setDate(weekStart.getDate() + 6);
-                    return ticketDate >= weekStart && ticketDate <= weekEnd;
-                  }).map(t => t.ticket_id))].length}
+                  {weeklyData.uniqueTickets}
                 </span>
               </div>
               <div className="flex justify-between">
