@@ -125,6 +125,21 @@ export const InsightsRecommendations: React.FC<InsightsRecommendationsProps> = (
         icon: AlertTriangle
       });
     }
+    
+    // Weekly performance insights
+    const currentWeek = new Date();
+    currentWeek.setDate(currentWeek.getDate() - currentWeek.getDay());
+    const weekTickets = employeeStats.reduce((sum, emp) => sum + emp.total_tickets, 0);
+    
+    if (weekTickets > 50) {
+      insights.push({
+        type: 'info',
+        title: 'High Volume Week',
+        description: `${weekTickets} tickets processed this period indicates high activity.`,
+        action: 'Monitor team workload and consider resource allocation adjustments.',
+        icon: TrendingUp
+      });
+    }
 
     return insights.slice(0, 5); // Limit to 5 insights
   };

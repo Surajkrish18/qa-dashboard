@@ -18,34 +18,6 @@ export class DynamoService {
     }
   }
 
-  static calculateSLACompliance(tickets: TicketData[]): number {
-    const interactions = tickets.flatMap(ticket => {
-      if (!ticket.response_times || !Array.isArray(ticket.response_times)) return [];
-      return ticket.response_times
-        .filter(response => response.response_type === 'Employee to Client')
-        .map(response => {
-          const responseTime = DynamoService.parseResponseTime(response.response_time);
-          return {
-            is_violation: responseTime > 30
-          };
-        });
-    });
-
-    const totalInteractions = interactions.length;
-    const violations = interactions.filter(i => i.is_violation).length;
-    const compliancePercentage = totalInteractions > 0
-      ? ((totalInteractions - violations) / totalInteractions) * 100
-      : 0;
-
-    return compliancePercentage;
-  }
-
-  static parseResponseTime(responseTimeStr: string): number {
-    if (!responseTimeStr || !responseTimeStr.includes(':')) return 0;
-    const [hours, minutes] = responseTimeStr.split(':').map(Number);
-    return hours * 60 + minutes;
-  }
-
   // Fetch tickets for a specific employee
   static async getTicketsByEmployee(employee: string): Promise<TicketData[]> {
     try {
@@ -223,20 +195,28 @@ export class DynamoService {
       const emp = stats[ticket.employee];
       emp.total_tickets++;
       
-      // Calculate running averages for QA scores with proper number conversion
+      // Calculate running averages for QA scores, excluding 0 and N/A values
       Object.keys(emp.avg_scores).forEach(key => {
         const scoreKey = key as keyof typeof emp.avg_scores;
-        const currentAvg = emp.avg_scores[scoreKey];
         const rawValue = ticket[scoreKey];
         const newValue = typeof rawValue === 'number' ? rawValue : parseFloat(rawValue as string) || 0;
         
-        // For core criteria, always include the score (even if 0)
-        // For contextual criteria, only include if it's a valid positive number
+        // Only include valid positive scores (exclude 0, NaN, null, undefined)
         const isCoreScore = CORE_CRITERIA.includes(scoreKey);
-        const isValidScore = !isNaN(newValue) && (isCoreScore || newValue > 0);
+        const isValidScore = !isNaN(newValue) && newValue > 0;
         
         if (isValidScore) {
-          emp.avg_scores[scoreKey] = (currentAvg * (emp.total_tickets - 1) + newValue) / emp.total_tickets;
+          // Track count of valid scores for proper averaging
+          if (!emp.avg_scores[`${scoreKey}_count` as any]) {
+            emp.avg_scores[`${scoreKey}_count` as any] = 0;
+          }
+          if (!emp.avg_scores[`${scoreKey}_sum` as any]) {
+            emp.avg_scores[`${scoreKey}_sum` as any] = 0;
+          }
+          
+          emp.avg_scores[`${scoreKey}_count` as any]++;
+          emp.avg_scores[`${scoreKey}_sum` as any] += newValue;
+          emp.avg_scores[scoreKey] = emp.avg_scores[`${scoreKey}_sum` as any] / emp.avg_scores[`${scoreKey}_count` as any];
         }
       });
       
@@ -245,6 +225,15 @@ export class DynamoService {
       if (sentiment === 'positive' || sentiment === 'negative' || sentiment === 'neutral' || sentiment === 'mixed') {
         emp.sentiment_distribution[sentiment as keyof typeof emp.sentiment_distribution]++;
       }
+    });
+    
+    // Clean up temporary counting fields
+    Object.values(stats).forEach(emp => {
+      Object.keys(emp.avg_scores).forEach(key => {
+        if (key.endsWith('_count') || key.endsWith('_sum')) {
+          delete emp.avg_scores[key as keyof typeof emp.avg_scores];
+        }
+      });
     });
     
     // Calculate SLA violations for each employee

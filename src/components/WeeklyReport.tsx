@@ -1,5 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { Calendar, Download, TrendingUp, Users, Target, AlertTriangle } from 'lucide-react';
+import * as XLSX from 'xlsx';
 import { TicketData, EmployeeStats } from '../types';
 import { DynamoService } from '../services/dynamoService';
 import { Sparkline } from './Sparkline';
@@ -50,6 +51,7 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({ tickets, employeeSta
   // Generate available weeks from ticket data
   const availableWeeks = useMemo(() => {
     const weeks = new Set<string>();
+    
     tickets.forEach(ticket => {
       const date = new Date(ticket.created_date);
       const weekStart = new Date(date);
@@ -57,6 +59,7 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({ tickets, employeeSta
       const weekKey = weekStart.toISOString().split('T')[0];
       weeks.add(weekKey);
     });
+    
     return Array.from(weeks).sort().reverse();
   }, [tickets]);
 
@@ -115,6 +118,31 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({ tickets, employeeSta
     })();
 
     const slaViolations = DynamoService.calculateSLAViolations(weekTickets).length;
+    
+    // Calculate SLA compliance based on actual interactions (matching SLA Monitoring logic)
+    const allInteractions: any[] = [];
+    weekTickets.forEach(ticket => {
+      if (ticket.response_times && Array.isArray(ticket.response_times)) {
+        const employeeResponses = ticket.response_times.filter(
+          response => response.response_type === 'Employee to Client'
+        );
+        employeeResponses.forEach(response => {
+          const responseTime = DynamoService.parseResponseTime(response.response_time);
+          allInteractions.push({
+            ticket_id: ticket.ticket_id,
+            employee: response.response_by,
+            response_time: responseTime,
+            is_violation: responseTime > 30
+          });
+        });
+      }
+    });
+    
+    const totalInteractions = allInteractions.length;
+    const violationInteractions = allInteractions.filter(interaction => interaction.is_violation).length;
+    const slaCompliance = totalInteractions > 0 
+      ? (((totalInteractions - violationInteractions) / totalInteractions) * 100)
+      : 100;
 
     const sentimentDistribution = weekTickets.reduce((acc, ticket) => {
       const sentiment = ticket.sentiment?.toLowerCase();
@@ -155,10 +183,10 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({ tickets, employeeSta
     const topPerformers = Object.entries(weekEmployeeStats)
       .map(([employee, stats]) => ({
         employee,
-        score: stats.totalScore / stats.tickets,
+        score: stats.scores.length > 0 ? stats.totalScore / stats.scores.length : 0,
         tickets: stats.tickets
       }))
-      .filter(emp => emp.tickets >= 3) // Minimum 3 tickets to be considered
+      .filter(emp => emp.score > 0) // Only include employees with valid scores
       .sort((a, b) => b.score - a.score)
       .slice(0, 5);
 
@@ -178,6 +206,10 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({ tickets, employeeSta
         return acc;
       }, { positive: 0, negative: 0, neutral: 0, mixed: 0 });
 
+      // Calculate SLA violations for this specific employee in this week
+      const employeeSLAViolations = allInteractions.filter(
+        interaction => interaction.employee === employee && interaction.is_violation
+      ).length;
       return {
         employee,
         totalInteractions: stats.tickets,
@@ -185,7 +217,7 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({ tickets, employeeSta
         avgScore,
         ticketIds,
         sentimentDistribution: employeeSentiment,
-        slaViolations: DynamoService.calculateSLAViolations(employeeTickets).length
+        slaViolations: employeeSLAViolations
       };
     }).sort((a, b) => b.avgScore - a.avgScore);
 
@@ -232,7 +264,7 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({ tickets, employeeSta
       weekEnd: weekEnd.toLocaleDateString(),
       totalTickets: weekTickets.length,
       avgScore,
-      slaViolations,
+      slaViolations: violationInteractions,
       sentimentDistribution,
       topPerformers,
       employeeDetails,
@@ -244,32 +276,70 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({ tickets, employeeSta
   const exportReport = () => {
     if (!weeklyData) return;
     
-    const reportData = {
-      week: `${weeklyData.weekStart} - ${weeklyData.weekEnd}`,
-      summary: {
-        totalTickets: weeklyData.totalTickets,
-        averageScore: weeklyData.avgScore.toFixed(2),
-        slaViolations: weeklyData.slaViolations,
-        slaCompliance: `${(((weeklyData.totalTickets - weeklyData.slaViolations) / weeklyData.totalTickets) * 100).toFixed(1)}%`
-      },
-      sentimentDistribution: weeklyData.sentimentDistribution,
-      topPerformers: weeklyData.topPerformers,
-      employeeDetails: weeklyData.employeeDetails,
-      dailyMetrics: {
-        tickets: weeklyData.dailyTickets,
-        averageScores: weeklyData.dailyScores.map(score => score.toFixed(2))
-      }
-    };
-
-    const blob = new Blob([JSON.stringify(reportData, null, 2)], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `weekly-report-${selectedWeek}.json`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
+    // Create workbook
+    const workbook = XLSX.utils.book_new();
+    
+    // Summary sheet
+    const summaryData = [
+      ['Weekly Report Summary', ''],
+      ['Week Period', `${weeklyData.weekStart} - ${weeklyData.weekEnd}`],
+      ['Total Tickets', weeklyData.totalTickets],
+      ['Average QA Score', weeklyData.avgScore.toFixed(2)],
+      ['SLA Violations', weeklyData.slaViolations],
+      ['SLA Compliance', `${weeklyData.totalTickets > 0 ? (((weeklyData.totalTickets - weeklyData.slaViolations) / weeklyData.totalTickets) * 100).toFixed(1) : '0.0'}%`],
+      [''],
+      ['Daily Breakdown', ''],
+      ['Day', 'Tickets', 'Avg Score'],
+      ...['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map((day, index) => [
+        day,
+        weeklyData.dailyTickets[index],
+        weeklyData.dailyScores[index] > 0 ? weeklyData.dailyScores[index].toFixed(2) : 'N/A'
+      ])
+    ];
+    
+    const summarySheet = XLSX.utils.aoa_to_sheet(summaryData);
+    XLSX.utils.book_append_sheet(workbook, summarySheet, 'Summary');
+    
+    // Employee Details sheet
+    const employeeData = [
+      ['Employee Performance Details', '', '', '', '', '', ''],
+      ['Employee', 'Total Interactions', 'Unique Tickets', 'Avg Score', 'Positive', 'Negative', 'Neutral', 'Mixed', 'SLA Violations', 'Ticket IDs'],
+      ...weeklyData.employeeDetails.map(emp => [
+        emp.employee,
+        emp.totalInteractions,
+        emp.uniqueTickets,
+        emp.avgScore.toFixed(2),
+        emp.sentimentDistribution.positive,
+        emp.sentimentDistribution.negative,
+        emp.sentimentDistribution.neutral,
+        emp.sentimentDistribution.mixed,
+        emp.slaViolations,
+        emp.ticketIds.join(', ')
+      ])
+    ];
+    
+    const employeeSheet = XLSX.utils.aoa_to_sheet(employeeData);
+    XLSX.utils.book_append_sheet(workbook, employeeSheet, 'Employee Details');
+    
+    // Top Performers sheet
+    if (weeklyData.topPerformers.length > 0) {
+      const topPerformersData = [
+        ['Top Performers', '', ''],
+        ['Rank', 'Employee', 'Score', 'Tickets'],
+        ...weeklyData.topPerformers.map((performer, index) => [
+          index + 1,
+          performer.employee,
+          performer.score.toFixed(2),
+          performer.tickets
+        ])
+      ];
+      
+      const topPerformersSheet = XLSX.utils.aoa_to_sheet(topPerformersData);
+      XLSX.utils.book_append_sheet(workbook, topPerformersSheet, 'Top Performers');
+    }
+    
+    // Export the file
+    XLSX.writeFile(workbook, `weekly-report-${selectedWeek}.xlsx`);
   };
 
   if (!weeklyData) {
@@ -288,6 +358,40 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({ tickets, employeeSta
   }
 
   const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
+  // Calculate SLA compliance based on actual interactions (matching SLA Monitoring logic)
+  const allInteractions: any[] = [];
+  const weekStart = new Date(selectedWeek);
+  const weekEnd = new Date(weekStart);
+  weekEnd.setDate(weekStart.getDate() + 6);
+  
+  const weekTickets = tickets.filter(ticket => {
+    const ticketDate = new Date(ticket.created_date);
+    return ticketDate >= weekStart && ticketDate <= weekEnd;
+  });
+
+  weekTickets.forEach(ticket => {
+    if (ticket.response_times && Array.isArray(ticket.response_times)) {
+      const employeeResponses = ticket.response_times.filter(
+        response => response.response_type === 'Employee to Client'
+      );
+      employeeResponses.forEach(response => {
+        const responseTime = DynamoService.parseResponseTime(response.response_time);
+        allInteractions.push({
+          ticket_id: ticket.ticket_id,
+          employee: response.response_by,
+          response_time: responseTime,
+          is_violation: responseTime > 30
+        });
+      });
+    }
+  });
+  
+  const totalInteractions = allInteractions.length;
+  const violationInteractions = allInteractions.filter(interaction => interaction.is_violation).length;
+  const slaCompliance = totalInteractions > 0 
+    ? (((totalInteractions - violationInteractions) / totalInteractions) * 100)
+    : 100;
 
   return (
     <div className="space-y-6">
@@ -366,7 +470,7 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({ tickets, employeeSta
               <div>
                 <p className="text-purple-400 text-sm">SLA Compliance</p>
                 <p className="text-2xl font-bold text-white">
-                  {weeklyData.totalTickets > 0 ? (((weeklyData.totalTickets - weeklyData.slaViolations) / weeklyData.totalTickets) * 100).toFixed(1) : '0.0'}%
+                  {slaCompliance.toFixed(1)}%
                 </p>
               </div>
               <Target className="h-8 w-8 text-purple-400" />
@@ -508,6 +612,12 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({ tickets, employeeSta
                 <span className="text-gray-300">Best Performer:</span>
                 <span className="text-green-400 font-medium">
                   {weeklyData.topPerformers[0]?.employee || 'N/A'}
+                </span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-gray-300">SLA Compliance:</span>
+                <span className="text-purple-400 font-medium">
+                  {slaCompliance.toFixed(1)}%
                 </span>
               </div>
             </div>

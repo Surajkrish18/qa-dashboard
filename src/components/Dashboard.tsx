@@ -31,9 +31,61 @@ export const Dashboard: React.FC = () => {
     return DynamoService.searchTickets(tickets, searchQuery);
   }, [tickets, searchQuery]);
 
-  const totalTickets = tickets.length;
+  // Calculate unique tickets count
+  const totalTickets = useMemo(() => {
+    return new Set(tickets.map(ticket => ticket.ticket_id)).size;
+  }, [tickets]);
+  
   const totalEmployees = employeeStats.length;
   const totalSLAViolations = slaViolations.length;
+  
+  // Calculate SLA compliance using the exact same method as SLA Monitoring
+  const slaCompliance = (() => {
+    if (tickets.length === 0) return 100;
+    
+    const interactions: any[] = [];
+    const processedInteractions = new Set<string>();
+    
+    tickets.forEach(ticket => {
+      if (!ticket.response_times || !Array.isArray(ticket.response_times)) {
+        return;
+      }
+      
+      try {
+        const employeeResponses = ticket.response_times.filter(
+          response => response && response.response_type === 'Employee to Client'
+        );
+        
+        employeeResponses.forEach(response => {
+          if (!response || !response.response_by || !response.response_time) {
+            return;
+          }
+          
+          // Create unique key to prevent duplicates
+          const interactionKey = `${ticket.ticket_id}-${response.response_by}-${response.response_time}`;
+          if (processedInteractions.has(interactionKey)) return;
+          processedInteractions.add(interactionKey);
+          
+          const responseTime = DynamoService.parseResponseTime(response.response_time);
+          interactions.push({
+            ticket_id: ticket.ticket_id,
+            employee: response.response_by,
+            response_time: responseTime,
+            is_violation: responseTime > 30
+          });
+        });
+      } catch (error) {
+        console.warn('Error processing SLA compliance for ticket:', ticket.ticket_id, error);
+      }
+    });
+    
+    const totalInteractions = interactions.length;
+    const violationInteractions = interactions.filter(interaction => interaction.is_violation).length;
+    return totalInteractions > 0 
+      ? (((totalInteractions - violationInteractions) / totalInteractions) * 100)
+      : 100;
+  })();
+  
   const avgOverallScore = (() => {
     const overallScores = employeeStats
       .map(emp => DynamoService.calculateOverallScore(emp.avg_scores))
@@ -45,7 +97,6 @@ export const Dashboard: React.FC = () => {
     { id: 'overview', label: 'Overview', icon: BarChart3 },
     { id: 'employees', label: 'Employee Performance', icon: Users },
     { id: 'sla', label: 'SLA Monitoring', icon: AlertTriangle },
-    { id: 'analytics', label: 'Analytics', icon: TrendingUp },
     { id: 'tickets', label: 'Ticket Details', icon: Filter },
     { id: 'weekly', label: 'Weekly Report', icon: BarChart3 }
   ];
@@ -197,14 +248,14 @@ export const Dashboard: React.FC = () => {
           <div className="bg-gray-800 rounded-lg p-6 border border-gray-700">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-gray-400 text-sm">SLA Violations</p>
-                <p className="text-2xl font-bold text-white">{totalSLAViolations}</p>
+                <p className="text-gray-400 text-sm">SLA Compliance</p>
+                <p className="text-2xl font-bold text-white">{slaCompliance.toFixed(1)}%</p>
               </div>
               <div className="flex flex-col items-end space-y-2">
-                <div className="p-3 bg-red-500/10 rounded-lg">
-                  <AlertTriangle className="h-6 w-6 text-red-400" />
+                <div className={`p-3 rounded-lg ${slaCompliance >= 90 ? 'bg-green-500/10' : 'bg-red-500/10'}`}>
+                  <AlertTriangle className={`h-6 w-6 ${slaCompliance >= 90 ? 'text-green-400' : 'text-red-400'}`} />
                 </div>
-                <Sparkline data={violationTrend} color="#EF4444" height={20} width={60} />
+                <Sparkline data={violationTrend} color={slaCompliance >= 90 ? "#10B981" : "#EF4444"} height={20} width={60} />
               </div>
             </div>
           </div>
@@ -247,9 +298,36 @@ export const Dashboard: React.FC = () => {
         <div className="space-y-6">
           {activeTab === 'overview' && (
             <div className="space-y-6">
+              {/* Quick Actions Bar */}
+              <div className="bg-gray-800 rounded-lg p-4 border border-gray-700">
+                <div className="flex items-center justify-between">
+                  <h3 className="text-lg font-semibold text-white">Quick Actions</h3>
+                  <div className="flex space-x-3">
+                    <button
+                      onClick={() => setActiveTab('weekly')}
+                      className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors text-sm"
+                    >
+                      Generate Weekly Report
+                    </button>
+                    <button
+                      onClick={() => setActiveTab('sla')}
+                      className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg transition-colors text-sm"
+                    >
+                      Check SLA Status
+                    </button>
+                    <button
+                      onClick={() => setActiveTab('employees')}
+                      className="px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg transition-colors text-sm"
+                    >
+                      Review Team Performance
+                    </button>
+                  </div>
+                </div>
+              </div>
+              
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                 <TicketStatistics tickets={filteredTickets} />
-		<OverallAnalytics employeeStats={employeeStats} tickets={tickets} />
+                <OverallAnalytics employeeStats={employeeStats} tickets={tickets} />
               </div>
               <InsightsRecommendations 
                 employeeStats={employeeStats}
@@ -267,10 +345,8 @@ export const Dashboard: React.FC = () => {
             />
           )}
           
-          {activeTab === 'sla' && <SLAMonitoring violations={slaViolations} tickets={filteredTickets} />}
+          {activeTab === 'sla' && <SLAMonitoring violations={slaViolations} tickets={tickets} />}
           
-          {activeTab === 'analytics' && <OverallAnalytics employeeStats={employeeStats} tickets={tickets} />}
-
           {activeTab === 'tickets' && <TicketDetails tickets={filteredTickets} />}
           
           {activeTab === 'weekly' && (

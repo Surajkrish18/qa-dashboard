@@ -2,18 +2,16 @@ import React from 'react';
 import { TrendingUp, Award, Target, Users } from 'lucide-react';
 import { EmployeeStats } from '../types';
 import { DynamoService } from '../services/dynamoService';
-import { TicketData } from '../types';
 
 interface OverallAnalyticsProps {
   employeeStats: EmployeeStats[];
-  tickets: TicketData[];
 }
 
-export const OverallAnalytics: React.FC<OverallAnalyticsProps> = ({ employeeStats , tickets }) => {
+export const OverallAnalytics: React.FC<OverallAnalyticsProps> = ({ employeeStats }) => {
   const totalTickets = employeeStats.reduce((sum, emp) => sum + emp.total_tickets, 0);
   const totalViolations = employeeStats.reduce((sum, emp) => sum + emp.sla_violations, 0);
-  const slaCompliance = DynamoService.calculateSLACompliance(tickets);
-
+  const slaCompliance = ((totalTickets - totalViolations) / totalTickets) * 100;
+  
   const topPerformers = employeeStats
     .map(emp => ({
       ...emp,
@@ -71,16 +69,6 @@ export const OverallAnalytics: React.FC<OverallAnalyticsProps> = ({ employeeStat
         </h3>
         
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
-          <div className="bg-green-500/10 rounded-lg p-4 border border-green-500/20">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-green-400 text-sm">SLA Compliance</p>
-                <p className="text-2xl font-bold text-white">{slaCompliance.toFixed(1)}%</p>
-              </div>
-              <Target className="h-8 w-8 text-green-400" />
-            </div>
-          </div>
-          
           <div className="bg-blue-500/10 rounded-lg p-4 border border-blue-500/20">
             <div className="flex items-center justify-between">
               <div>

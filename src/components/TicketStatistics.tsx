@@ -99,6 +99,31 @@ export const TicketStatistics: React.FC<TicketStatisticsProps> = ({ tickets }) =
             </div>
           </div>
           
+          {/* Peak Activity Day */}
+          <div className="bg-purple-500/10 rounded-lg p-3 border border-purple-500/20">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center space-x-2">
+                <TrendingUp className="h-4 w-4 text-purple-400" />
+                <span className="text-purple-400 text-sm">Peak Activity Day</span>
+              </div>
+              <div className="text-right">
+                <div className="text-white font-medium">
+                  {(() => {
+                    const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+                    const dailyCounts = Array(7).fill(0);
+                    tickets.forEach(ticket => {
+                      const day = new Date(ticket.created_date).getDay();
+                      dailyCounts[day]++;
+                    });
+                    const maxDay = dailyCounts.indexOf(Math.max(...dailyCounts));
+                    return dayNames[maxDay];
+                  })()}
+                </div>
+                <div className="text-purple-400 text-xs">busiest</div>
+              </div>
+            </div>
+          </div>
+          
           {/* Sentiment Distribution */}
           <div>
             <h5 className="font-medium text-white mb-2 flex items-center">

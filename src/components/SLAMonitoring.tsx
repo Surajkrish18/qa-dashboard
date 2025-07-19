@@ -1,11 +1,11 @@
-import React, { useState } from 'react';
-import { AlertTriangle, Clock, XCircle, CheckCircle, User, Calendar, Filter } from 'lucide-react';
+import React, { useState, useMemo } from 'react';
+import { AlertTriangle, Clock, XCircle, CheckCircle, User, Calendar, Filter, TrendingUp } from 'lucide-react';
 import { SLAViolation, TicketData } from '../types';
 import { DynamoService } from '../services/dynamoService';
 
 interface SLAMonitoringProps {
   violations: SLAViolation[];
-  tickets: TicketData[];
+  tickets?: TicketData[];
 }
 
 interface SLAInteraction {
@@ -18,63 +18,102 @@ interface SLAInteraction {
   sla_limit: number;
 }
 
-export const SLAMonitoring: React.FC<SLAMonitoringProps> = ({ violations, tickets }) => {
+export const SLAMonitoring: React.FC<SLAMonitoringProps> = ({ violations = [], tickets = [] }) => {
   const [activeTab, setActiveTab] = useState<'violations' | 'compliant' | 'all'>('all');
   const [selectedEmployee, setSelectedEmployee] = useState<string>('all');
 
-  // Calculate all SLA interactions (both violations and compliant)
-  const getAllSLAInteractions = (): SLAInteraction[] => {
+  // Safely calculate all SLA interactions
+  const allInteractions = useMemo((): SLAInteraction[] => {
+    if (!tickets || !Array.isArray(tickets)) {
+      return [];
+    }
+
     const interactions: SLAInteraction[] = [];
+    const processedInteractions = new Set<string>();
     
-    tickets.forEach(ticket => {
-      if (!ticket.response_times || !Array.isArray(ticket.response_times)) {
-        return;
-      }
-      
-      // Filter for "Employee to Client" responses only
-      const employeeResponses = ticket.response_times.filter(
-        response => response.response_type === 'Employee to Client'
-      );
-      
-      employeeResponses.forEach(response => {
-        const responseTime = DynamoService.parseResponseTime(response.response_time);
-        const slaLimit = 30; // 30 minutes SLA
+    try {
+      tickets.forEach(ticket => {
+        if (!ticket || !ticket.response_times || !Array.isArray(ticket.response_times)) {
+          return;
+        }
         
-        interactions.push({
-          ticket_id: ticket.ticket_id,
-          employee: response.response_by,
-          response_time: responseTime,
-          response_type: response.response_type,
-          created_date: ticket.created_date,
-          is_violation: responseTime > slaLimit,
-          sla_limit: slaLimit
+        // Filter for "Employee to Client" responses only
+        const employeeResponses = ticket.response_times.filter(
+          response => response && response.response_type === 'Employee to Client'
+        );
+        
+        employeeResponses.forEach(response => {
+          if (!response || !response.response_by || !response.response_time) {
+            return;
+          }
+
+          try {
+            const responseTime = DynamoService.parseResponseTime(response.response_time);
+            const slaLimit = 30; // 30 minutes SLA
+            
+            // Create unique key to prevent duplicates
+            const interactionKey = `${ticket.ticket_id}-${response.response_by}-${response.response_time}`;
+            if (processedInteractions.has(interactionKey)) return;
+            processedInteractions.add(interactionKey);
+            
+            interactions.push({
+              ticket_id: ticket.ticket_id || 'Unknown',
+              employee: response.response_by || 'Unknown',
+              response_time: responseTime,
+              response_type: response.response_type,
+              created_date: ticket.created_date || new Date().toISOString(),
+              is_violation: responseTime > slaLimit,
+              sla_limit: slaLimit
+            });
+          } catch (error) {
+            console.warn('Error processing response time:', error);
+          }
         });
       });
-    });
+    } catch (error) {
+      console.error('Error processing SLA interactions:', error);
+    }
 
     return interactions.sort((a, b) => new Date(b.created_date).getTime() - new Date(a.created_date).getTime());
-  };
+  }, [tickets]);
 
-  const allInteractions = getAllSLAInteractions();
-  const violationInteractions = allInteractions.filter(interaction => interaction.is_violation);
-  const compliantInteractions = allInteractions.filter(interaction => !interaction.is_violation);
-  
-  // Calculate percentages
-  const totalInteractions = allInteractions.length;
-  const violationPercentage = totalInteractions > 0 ? (violationInteractions.length / totalInteractions) * 100 : 0;
-  const compliancePercentage = 100 - violationPercentage;
+  // Calculate metrics safely
+  const metrics = useMemo(() => {
+    const violationInteractions = allInteractions.filter(interaction => interaction.is_violation);
+    const compliantInteractions = allInteractions.filter(interaction => !interaction.is_violation);
+    const totalInteractions = allInteractions.length;
+    
+    const violationPercentage = totalInteractions > 0 ? (violationInteractions.length / totalInteractions) * 100 : 0;
+    const compliancePercentage = 100 - violationPercentage;
+    
+    const avgResponseTime = totalInteractions > 0 
+      ? allInteractions.reduce((sum, interaction) => sum + interaction.response_time, 0) / totalInteractions
+      : 0;
+
+    return {
+      totalInteractions,
+      violationInteractions: violationInteractions.length,
+      compliantInteractions: compliantInteractions.length,
+      violationPercentage,
+      compliancePercentage,
+      avgResponseTime
+    };
+  }, [allInteractions]);
 
   // Get unique employees for filter
-  const uniqueEmployees = [...new Set(allInteractions.map(interaction => interaction.employee))].sort();
+  const uniqueEmployees = useMemo(() => {
+    const employees = [...new Set(allInteractions.map(interaction => interaction.employee))];
+    return employees.filter(emp => emp && emp !== 'Unknown').sort();
+  }, [allInteractions]);
 
   // Filter interactions based on active tab and selected employee
-  const getFilteredInteractions = () => {
+  const filteredInteractions = useMemo(() => {
     let filtered = allInteractions;
     
     if (activeTab === 'violations') {
-      filtered = violationInteractions;
+      filtered = allInteractions.filter(interaction => interaction.is_violation);
     } else if (activeTab === 'compliant') {
-      filtered = compliantInteractions;
+      filtered = allInteractions.filter(interaction => !interaction.is_violation);
     }
     
     if (selectedEmployee !== 'all') {
@@ -82,9 +121,7 @@ export const SLAMonitoring: React.FC<SLAMonitoringProps> = ({ violations, ticket
     }
     
     return filtered;
-  };
-
-  const filteredInteractions = getFilteredInteractions();
+  }, [allInteractions, activeTab, selectedEmployee]);
 
   const getResponseTimeColor = (responseTime: number, slaLimit: number) => {
     return responseTime <= slaLimit ? 'text-green-400' : 'text-red-400';
@@ -110,7 +147,7 @@ export const SLAMonitoring: React.FC<SLAMonitoringProps> = ({ violations, ticket
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-blue-400 text-sm">Total Interactions</p>
-                <p className="text-2xl font-bold text-white">{totalInteractions}</p>
+                <p className="text-2xl font-bold text-white">{metrics.totalInteractions}</p>
               </div>
               <Clock className="h-8 w-8 text-blue-400" />
             </div>
@@ -120,8 +157,8 @@ export const SLAMonitoring: React.FC<SLAMonitoringProps> = ({ violations, ticket
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-red-400 text-sm">SLA Violations</p>
-                <p className="text-2xl font-bold text-white">{violationInteractions.length}</p>
-                <p className="text-red-400 text-xs">{violationPercentage.toFixed(1)}%</p>
+                <p className="text-2xl font-bold text-white">{metrics.violationInteractions}</p>
+                <p className="text-red-400 text-xs">{metrics.violationPercentage.toFixed(1)}%</p>
               </div>
               <XCircle className="h-8 w-8 text-red-400" />
             </div>
@@ -131,8 +168,8 @@ export const SLAMonitoring: React.FC<SLAMonitoringProps> = ({ violations, ticket
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-green-400 text-sm">SLA Compliant</p>
-                <p className="text-2xl font-bold text-white">{compliantInteractions.length}</p>
-                <p className="text-green-400 text-xs">{compliancePercentage.toFixed(1)}%</p>
+                <p className="text-2xl font-bold text-white">{metrics.compliantInteractions}</p>
+                <p className="text-green-400 text-xs">{metrics.compliancePercentage.toFixed(1)}%</p>
               </div>
               <CheckCircle className="h-8 w-8 text-green-400" />
             </div>
@@ -143,13 +180,10 @@ export const SLAMonitoring: React.FC<SLAMonitoringProps> = ({ violations, ticket
               <div>
                 <p className="text-purple-400 text-sm">Avg Response Time</p>
                 <p className="text-2xl font-bold text-white">
-                  {totalInteractions > 0 
-                    ? (allInteractions.reduce((sum, interaction) => sum + interaction.response_time, 0) / totalInteractions).toFixed(0)
-                    : '0'
-                  }m
+                  {metrics.avgResponseTime.toFixed(0)}m
                 </p>
               </div>
-              <Clock className="h-8 w-8 text-purple-400" />
+              <TrendingUp className="h-8 w-8 text-purple-400" />
             </div>
           </div>
         </div>
@@ -160,16 +194,16 @@ export const SLAMonitoring: React.FC<SLAMonitoringProps> = ({ violations, ticket
           <div className="space-y-2 text-sm">
             <div className="flex items-center justify-between">
               <span className="text-gray-300">Initial Response Time</span>
-              <span className="text-blue-400 font-medium">&le; 30 minutes (Employee to Client)</span>
+              <span className="text-blue-400 font-medium">≤ 30 minutes (Employee to Client)</span>
             </div>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
               <div className="flex items-center space-x-2">
                 <div className="w-3 h-3 bg-green-500 rounded-full"></div>
-                <span className="text-green-400 text-xs">SLA Met: &le;30 min</span>
+                <span className="text-green-400 text-xs">SLA Met: ≤30 min</span>
               </div>
               <div className="flex items-center space-x-2">
                 <div className="w-3 h-3 bg-red-500 rounded-full"></div>
-                <span className="text-red-400 text-xs">Violation: &gt;30 min</span>
+                <span className="text-red-400 text-xs">Violation: {'>'}30 min</span>
               </div>
             </div>
           </div>
@@ -207,7 +241,7 @@ export const SLAMonitoring: React.FC<SLAMonitoringProps> = ({ violations, ticket
                     : 'text-gray-400 hover:text-white'
                 }`}
               >
-                All ({totalInteractions})
+                All ({metrics.employeeToClientTotal})
               </button>
               <button
                 onClick={() => setActiveTab('violations')}
@@ -217,7 +251,7 @@ export const SLAMonitoring: React.FC<SLAMonitoringProps> = ({ violations, ticket
                     : 'text-gray-400 hover:text-white'
                 }`}
               >
-                Violations ({violationInteractions.length})
+                Violations ({metrics.violationInteractions})
               </button>
               <button
                 onClick={() => setActiveTab('compliant')}
@@ -227,7 +261,7 @@ export const SLAMonitoring: React.FC<SLAMonitoringProps> = ({ violations, ticket
                     : 'text-gray-400 hover:text-white'
                 }`}
               >
-                Compliant ({compliantInteractions.length})
+                Compliant ({metrics.compliantInteractions})
               </button>
             </div>
           </div>
@@ -239,6 +273,9 @@ export const SLAMonitoring: React.FC<SLAMonitoringProps> = ({ violations, ticket
             <div className="text-center py-8 text-gray-400">
               <Clock className="h-12 w-12 mx-auto mb-4 opacity-50" />
               <p>No interactions found for the selected filters</p>
+              {metrics.totalInteractions === 0 && (
+                <p className="text-sm mt-2">No response time data available in tickets</p>
+              )}
             </div>
           ) : (
             filteredInteractions.map((interaction, index) => (
@@ -338,7 +375,10 @@ export const SLAMonitoring: React.FC<SLAMonitoringProps> = ({ violations, ticket
               <div className="flex items-center justify-between">
                 <span className="text-gray-300">Avg Response Time</span>
                 <span className="text-white font-semibold">
-                  {(filteredInteractions.reduce((sum, interaction) => sum + interaction.response_time, 0) / filteredInteractions.length).toFixed(1)}m
+                  {filteredInteractions.length > 0 
+                    ? (filteredInteractions.reduce((sum, interaction) => sum + interaction.response_time, 0) / filteredInteractions.length).toFixed(1)
+                    : '0'
+                  }m
                 </span>
               </div>
             </div>
@@ -346,11 +386,14 @@ export const SLAMonitoring: React.FC<SLAMonitoringProps> = ({ violations, ticket
               <div className="flex items-center justify-between">
                 <span className="text-gray-300">Violation Rate</span>
                 <span className={`font-semibold ${
-                  (filteredInteractions.filter(i => i.is_violation).length / filteredInteractions.length) * 100 > 10 
+                  filteredInteractions.length > 0 && (filteredInteractions.filter(i => i.is_violation).length / filteredInteractions.length) * 100 > 10 
                     ? 'text-red-400' 
                     : 'text-green-400'
                 }`}>
-                  {((filteredInteractions.filter(i => i.is_violation).length / filteredInteractions.length) * 100).toFixed(1)}%
+                  {filteredInteractions.length > 0 
+                    ? ((filteredInteractions.filter(i => i.is_violation).length / filteredInteractions.length) * 100).toFixed(1)
+                    : '0'
+                  }%
                 </span>
               </div>
             </div>
