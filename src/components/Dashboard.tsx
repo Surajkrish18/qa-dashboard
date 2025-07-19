@@ -27,14 +27,13 @@ export const Dashboard: React.FC = () => {
     refreshData 
   } = useTicketData();
 
-  const filteredTickets = useMemo(() => {
-    return DynamoService.searchTickets(tickets, searchQuery);
-  }, [tickets, searchQuery]);
-
   // Calculate unique tickets count
   const totalTickets = useMemo(() => {
     return new Set(tickets.map(ticket => ticket.ticket_id)).size;
   }, [tickets]);
+  
+  const totalEmployees = employeeStats.length;
+  const totalSLAViolations = slaViolations.length;
   
   const totalTickets = useMemo(() => {
     return new Set(tickets.map(ticket => ticket.ticket_id)).size;
