@@ -36,6 +36,10 @@ export const Dashboard: React.FC = () => {
     return new Set(tickets.map(ticket => ticket.ticket_id)).size;
   }, [tickets]);
   
+  const totalTickets = useMemo(() => {
+    return new Set(tickets.map(ticket => ticket.ticket_id)).size;
+  }, [tickets]);
+  
   const totalEmployees = employeeStats.length;
   const totalSLAViolations = slaViolations.length;
   
@@ -297,39 +301,10 @@ export const Dashboard: React.FC = () => {
         {/* Content Area */}
         <div className="space-y-6">
           {activeTab === 'overview' && (
-            <div className="space-y-6">
-              {/* Quick Actions Bar */}
-              <div className="bg-gray-800 rounded-lg p-4 border border-gray-700">
-                <div className="flex items-center justify-between">
-                  <h3 className="text-lg font-semibold text-white">Quick Actions</h3>
-                  <div className="flex space-x-3">
-                    <button
-                      onClick={() => setActiveTab('weekly')}
-                      className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors text-sm"
-                    >
-                      Generate Weekly Report
-                    </button>
-                    <button
-                      onClick={() => setActiveTab('sla')}
-                      className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg transition-colors text-sm"
-                    >
-                      Check SLA Status
-                    </button>
-                    <button
-                      onClick={() => setActiveTab('employees')}
-                      className="px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg transition-colors text-sm"
-                    >
-                      Review Team Performance
-                    </button>
-                  </div>
-                </div>
-              </div>
-              
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                <TicketStatistics tickets={filteredTickets} />
-                <OverallAnalytics employeeStats={employeeStats} tickets={tickets} />
-              </div>
-              <InsightsRecommendations 
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              <TicketStatistics tickets={filteredTickets} />
+              <OverallAnalytics employeeStats={employeeStats} />
+            </div>
                 employeeStats={employeeStats}
                 slaViolations={slaViolations}
                 totalTickets={totalTickets}

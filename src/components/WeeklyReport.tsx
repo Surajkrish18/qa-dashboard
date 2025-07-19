@@ -14,6 +14,7 @@ interface WeeklyData {
   weekStart: string;
   weekEnd: string;
   totalTickets: number;
+  uniqueTickets: number;
   avgScore: number;
   slaViolations: number;
   sentimentDistribution: {
@@ -88,6 +89,7 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({ tickets, employeeSta
         weekStart: weekStart.toLocaleDateString(),
         weekEnd: weekEnd.toLocaleDateString(),
         totalTickets: 0,
+        uniqueTickets: 0,
         avgScore: 0,
         slaViolations: 0,
         sentimentDistribution: { positive: 0, negative: 0, neutral: 0, mixed: 0 },
@@ -97,6 +99,9 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({ tickets, employeeSta
         dailyScores: [0, 0, 0, 0, 0, 0, 0]
       };
     }
+
+    // Calculate unique tickets for the week
+    const uniqueTickets = new Set(weekTickets.map(ticket => ticket.ticket_id)).size;
 
     // Calculate metrics
     const avgScore = (() => {
@@ -263,6 +268,7 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({ tickets, employeeSta
       weekStart: weekStart.toLocaleDateString(),
       weekEnd: weekEnd.toLocaleDateString(),
       totalTickets: weekTickets.length,
+      uniqueTickets,
       avgScore,
       slaViolations: violationInteractions,
       sentimentDistribution,
@@ -434,8 +440,8 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({ tickets, employeeSta
           <div className="bg-blue-500/10 rounded-lg p-4 border border-blue-500/20">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-blue-400 text-sm">Total Tickets</p>
-                <p className="text-2xl font-bold text-white">{weeklyData.totalTickets}</p>
+                <p className="text-blue-400 text-sm">Unique Tickets</p>
+                <p className="text-2xl font-bold text-white">{weeklyData.uniqueTickets}</p>
               </div>
               <div className="text-blue-400">
                 <Sparkline data={weeklyData.dailyTickets} color="#3B82F6" showTrend={false} />
@@ -459,7 +465,7 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({ tickets, employeeSta
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-red-400 text-sm">SLA Violations</p>
-                <p className="text-2xl font-bold text-white">{weeklyData.slaViolations}</p>
+                <p className="text-2xl font-bold text-white">{violationInteractions}</p>
               </div>
               <AlertTriangle className="h-8 w-8 text-red-400" />
             </div>

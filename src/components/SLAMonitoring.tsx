@@ -146,7 +146,7 @@ export const SLAMonitoring: React.FC<SLAMonitoringProps> = ({ violations = [], t
           <div className="bg-blue-500/10 rounded-lg p-4 border border-blue-500/20">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-blue-400 text-sm">Total Interactions</p>
+                <p className="text-blue-400 text-sm">Client Interactions</p>
                 <p className="text-2xl font-bold text-white">{metrics.totalInteractions}</p>
               </div>
               <Clock className="h-8 w-8 text-blue-400" />
