@@ -35,13 +35,6 @@ export const Dashboard: React.FC = () => {
   const totalEmployees = employeeStats.length;
   const totalSLAViolations = slaViolations.length;
   
-  const totalTickets = useMemo(() => {
-    return new Set(tickets.map(ticket => ticket.ticket_id)).size;
-  }, [tickets]);
-  
-  const totalEmployees = employeeStats.length;
-  const totalSLAViolations = slaViolations.length;
-  
   // Calculate SLA compliance using the exact same method as SLA Monitoring
   const slaCompliance = (() => {
     if (tickets.length === 0) return 100;
