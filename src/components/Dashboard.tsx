@@ -89,6 +89,15 @@ export const Dashboard: React.FC = () => {
     return overallScores.length > 0 ? overallScores.reduce((sum, score) => sum + score, 0) / overallScores.length : 0;
   })();
 
+  // Filter tickets based on search query
+  const filteredTickets = useMemo(() => {
+    if (!searchQuery.trim()) return tickets;
+    const lowerQuery = searchQuery.toLowerCase();
+    return tickets.filter(ticket => 
+      ticket.ticket_id.toLowerCase().includes(lowerQuery) ||
+      ticket.employee.toLowerCase().includes(lowerQuery)
+    );
+  }, [tickets, searchQuery]);
   const tabs = [
     { id: 'overview', label: 'Overview', icon: BarChart3 },
     { id: 'employees', label: 'Employee Performance', icon: Users },
@@ -293,7 +302,7 @@ export const Dashboard: React.FC = () => {
         {/* Content Area */}
         <div className="space-y-6">
           {activeTab === 'overview' && (
-            <>
+            <div className="space-y-6">
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                 <TicketStatistics tickets={filteredTickets} />
                 <OverallAnalytics employeeStats={employeeStats} />
@@ -303,7 +312,7 @@ export const Dashboard: React.FC = () => {
                 slaViolations={slaViolations}
                 totalTickets={totalTickets}
               />
-            </>
+            </div>
           )}
           
           {activeTab === 'employees' && (
