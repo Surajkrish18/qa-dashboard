@@ -293,15 +293,17 @@ export const Dashboard: React.FC = () => {
         {/* Content Area */}
         <div className="space-y-6">
           {activeTab === 'overview' && (
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-              <TicketStatistics tickets={filteredTickets} />
-              <OverallAnalytics employeeStats={employeeStats} />
-            </div>
+            <>
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                <TicketStatistics tickets={filteredTickets} />
+                <OverallAnalytics employeeStats={employeeStats} />
+              </div>
+              <InsightsRecommendations
                 employeeStats={employeeStats}
                 slaViolations={slaViolations}
                 totalTickets={totalTickets}
               />
-            </div>
+            </>
           )}
           
           {activeTab === 'employees' && (
