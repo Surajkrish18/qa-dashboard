@@ -84,44 +84,6 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({ tickets, employeeSta
       return ticketDate >= weekStart && ticketDate <= weekEnd;
     });
 
-    if (weekTickets.length === 0) {
-      return {
-        weekStart: weekStart.toLocaleDateString(),
-        weekEnd: weekEnd.toLocaleDateString(),
-        totalTickets: 0,
-        uniqueTickets: 0,
-        avgScore: 0,
-        slaViolations: violationInteractions, // This is now the actual violation count
-        sentimentDistribution: { positive: 0, negative: 0, neutral: 0, mixed: 0 },
-        topPerformers: [],
-        employeeDetails: [],
-        dailyTickets: [0, 0, 0, 0, 0, 0, 0],
-        dailyScores: [0, 0, 0, 0, 0, 0, 0]
-      };
-    }
-
-    // Calculate unique tickets for the week
-    const uniqueTickets = new Set(weekTickets.map(ticket => ticket.ticket_id)).size;
-
-    // Calculate metrics
-    const avgScore = (() => {
-      const scores = weekTickets.map(ticket => DynamoService.calculateOverallScore({
-        tone_and_trust: ticket.tone_and_trust,
-        grammar_language: ticket.grammar_language,
-        professionalism_clarity: ticket.professionalism_clarity,
-        non_tech_clarity: ticket.non_tech_clarity,
-        empathy: ticket.empathy,
-        responsiveness: ticket.responsiveness,
-        client_alignment: ticket.client_alignment,
-        proactivity: ticket.proactivity,
-        ownership_accountability: ticket.ownership_accountability,
-        enablement: ticket.enablement,
-        consistency: ticket.consistency,
-        risk_impact: ticket.risk_impact
-      })).filter(score => score > 0);
-      return scores.length > 0 ? scores.reduce((sum, score) => sum + score, 0) / scores.length : 0;
-    })();
-
     // Calculate SLA compliance using the exact same method as main dashboard
     const allInteractions: any[] = [];
     const processedInteractions = new Set<string>();
@@ -161,6 +123,44 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({ tickets, employeeSta
     
     const totalInteractions = allInteractions.length;
     const violationInteractions = allInteractions.filter(interaction => interaction.is_violation).length;
+
+    if (weekTickets.length === 0) {
+      return {
+        weekStart: weekStart.toLocaleDateString(),
+        weekEnd: weekEnd.toLocaleDateString(),
+        totalTickets: 0,
+        uniqueTickets: 0,
+        avgScore: 0,
+        slaViolations: 0,
+        sentimentDistribution: { positive: 0, negative: 0, neutral: 0, mixed: 0 },
+        topPerformers: [],
+        employeeDetails: [],
+        dailyTickets: [0, 0, 0, 0, 0, 0, 0],
+        dailyScores: [0, 0, 0, 0, 0, 0, 0]
+      };
+    }
+
+    // Calculate unique tickets for the week
+    const uniqueTickets = new Set(weekTickets.map(ticket => ticket.ticket_id)).size;
+
+    // Calculate metrics
+    const avgScore = (() => {
+      const scores = weekTickets.map(ticket => DynamoService.calculateOverallScore({
+        tone_and_trust: ticket.tone_and_trust,
+        grammar_language: ticket.grammar_language,
+        professionalism_clarity: ticket.professionalism_clarity,
+        non_tech_clarity: ticket.non_tech_clarity,
+        empathy: ticket.empathy,
+        responsiveness: ticket.responsiveness,
+        client_alignment: ticket.client_alignment,
+        proactivity: ticket.proactivity,
+        ownership_accountability: ticket.ownership_accountability,
+        enablement: ticket.enablement,
+        consistency: ticket.consistency,
+        risk_impact: ticket.risk_impact
+      })).filter(score => score > 0);
+      return scores.length > 0 ? scores.reduce((sum, score) => sum + score, 0) / scores.length : 0;
+    })();
 
     const sentimentDistribution = weekTickets.reduce((acc, ticket) => {
       const sentiment = ticket.sentiment?.toLowerCase();
@@ -404,56 +404,62 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({ tickets, employeeSta
 
   const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
-  // Calculate SLA compliance using the exact same method as main dashboard
-  const allInteractions: any[] = [];
-  const processedInteractions = new Set<string>();
-  const weekStart = new Date(selectedWeek);
-  const weekEnd = new Date(weekStart);
-  weekEnd.setDate(weekStart.getDate() + 6);
-  
-  const weekTickets = tickets.filter(ticket => {
-    const ticketDate = new Date(ticket.created_date);
-    return ticketDate >= weekStart && ticketDate <= weekEnd;
-  });
-
-  weekTickets.forEach(ticket => {
-    if (!ticket.response_times || !Array.isArray(ticket.response_times)) {
-      return;
-    }
+  // Calculate SLA compliance from weeklyData
+  const slaCompliance = (() => {
+    // Get the same week tickets used in weeklyData calculation
+    const weekStart = new Date(selectedWeek);
+    const weekEnd = new Date(weekStart);
+    weekEnd.setDate(weekStart.getDate() + 6);
     
-    try {
-      const employeeResponses = ticket.response_times.filter(
-        response => response && response.response_type === 'Employee to Client'
-      );
+    const weekTickets = tickets.filter(ticket => {
+      const ticketDate = new Date(ticket.created_date);
+      return ticketDate >= weekStart && ticketDate <= weekEnd;
+    });
+    
+    if (weekTickets.length === 0) return 100;
+    
+    const interactions: any[] = [];
+    const processedInteractions = new Set<string>();
+    
+    weekTickets.forEach(ticket => {
+      if (!ticket.response_times || !Array.isArray(ticket.response_times)) {
+        return;
+      }
       
-      employeeResponses.forEach(response => {
-        if (!response || !response.response_by || !response.response_time) {
-          return;
-        }
+      try {
+        const employeeResponses = ticket.response_times.filter(
+          response => response && response.response_type === 'Employee to Client'
+        );
         
-        // Create unique key to prevent duplicates
-        const interactionKey = `${ticket.ticket_id}-${response.response_by}-${response.response_time}`;
-        if (processedInteractions.has(interactionKey)) return;
-        processedInteractions.add(interactionKey);
-        
-        const responseTime = DynamoService.parseResponseTime(response.response_time);
-        allInteractions.push({
-          ticket_id: ticket.ticket_id,
-          employee: response.response_by,
-          response_time: responseTime,
-          is_violation: responseTime > 30
+        employeeResponses.forEach(response => {
+          if (!response || !response.response_by || !response.response_time) {
+            return;
+          }
+          
+          // Create unique key to prevent duplicates
+          const interactionKey = `${ticket.ticket_id}-${response.response_by}-${response.response_time}`;
+          if (processedInteractions.has(interactionKey)) return;
+          processedInteractions.add(interactionKey);
+          
+          const responseTime = DynamoService.parseResponseTime(response.response_time);
+          interactions.push({
+            ticket_id: ticket.ticket_id,
+            employee: response.response_by,
+            response_time: responseTime,
+            is_violation: responseTime > 30
+          });
         });
-      });
-    } catch (error) {
-      console.warn('Error processing SLA compliance for ticket:', ticket.ticket_id, error);
-    }
-  });
-  
-  const totalInteractions = allInteractions.length;
-  const violationInteractions = allInteractions.filter(interaction => interaction.is_violation).length;
-  const slaCompliance = totalInteractions > 0 
-    ? (((totalInteractions - violationInteractions) / totalInteractions) * 100)
-    : 100;
+      } catch (error) {
+        console.warn('Error processing SLA compliance for ticket:', ticket.ticket_id, error);
+      }
+    });
+    
+    const totalInteractions = interactions.length;
+    const violationInteractions = interactions.filter(interaction => interaction.is_violation).length;
+    return totalInteractions > 0 
+      ? (((totalInteractions - violationInteractions) / totalInteractions) * 100)
+      : 100;
+  })();
 
   return (
     <div className="space-y-6">
@@ -521,7 +527,7 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({ tickets, employeeSta
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-red-400 text-sm">SLA Violations</p>
-                <p className="text-2xl font-bold text-white">{violationInteractions}</p>
+                <p className="text-2xl font-bold text-white">{weeklyData.slaViolations}</p>
               </div>
               <AlertTriangle className="h-8 w-8 text-red-400" />
             </div>
