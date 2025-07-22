@@ -101,7 +101,7 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({ tickets, employeeSta
     }
 
     // Use the EXACT same SLA calculation as Dashboard component
-    const slaCalculation = (() => {
+    const slaViolationsCount = (() => {
       if (weekTickets.length === 0) return { violations: 0, compliance: 100 };
       
       const interactions: any[] = [];
@@ -142,7 +142,7 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({ tickets, employeeSta
       
       const totalInteractions = interactions.length;
       const violationInteractions = interactions.filter(interaction => interaction.is_violation).length;
-      const compliance = totalInteractions > 0 
+      return violationInteractions;
         ? (((totalInteractions - violationInteractions) / totalInteractions) * 100)
         : 100;
       
@@ -304,7 +304,7 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({ tickets, employeeSta
       totalTickets: weekTickets.length,
       uniqueTickets,
       avgScore,
-      slaViolations: slaCalculation.violations,
+      slaViolations: slaViolationsCount,
       sentimentDistribution,
       topPerformers,
       employeeDetails,
@@ -400,11 +400,62 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({ tickets, employeeSta
 
   const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
-  // Get SLA compliance directly from weeklyData
-  const slaCompliance = weeklyData ? 
-    (weeklyData.totalTickets > 0 ? 
-      (((weeklyData.totalTickets - weeklyData.slaViolations) / weeklyData.totalTickets) * 100) : 100) 
-    : 100;
+  // Calculate SLA compliance using the same method as Dashboard
+  const slaCompliance = useMemo(() => {
+    if (!weeklyData || weeklyData.totalTickets === 0) return 100;
+    
+    const weekStart = new Date(selectedWeek);
+    const weekEnd = new Date(weekStart);
+    weekEnd.setDate(weekStart.getDate() + 6);
+    
+    const weekTickets = tickets.filter(ticket => {
+      const ticketDate = new Date(ticket.created_date);
+      return ticketDate >= weekStart && ticketDate <= weekEnd;
+    });
+    
+    if (weekTickets.length === 0) return 100;
+    
+    const interactions: any[] = [];
+    const processedInteractions = new Set<string>();
+    
+    weekTickets.forEach(ticket => {
+      if (!ticket.response_times || !Array.isArray(ticket.response_times)) {
+        return;
+      }
+      
+      try {
+        const employeeResponses = ticket.response_times.filter(
+          response => response && response.response_type === 'Employee to Client'
+        );
+        
+        employeeResponses.forEach(response => {
+          if (!response || !response.response_by || !response.response_time) {
+            return;
+          }
+          
+          const interactionKey = `${ticket.ticket_id}-${response.response_by}-${response.response_time}`;
+          if (processedInteractions.has(interactionKey)) return;
+          processedInteractions.add(interactionKey);
+          
+          const responseTime = DynamoService.parseResponseTime(response.response_time);
+          interactions.push({
+            ticket_id: ticket.ticket_id,
+            employee: response.response_by,
+            response_time: responseTime,
+            is_violation: responseTime > 30
+          });
+        });
+      } catch (error) {
+        console.warn('Error processing SLA compliance for ticket:', ticket.ticket_id, error);
+      }
+    });
+    
+    const totalInteractions = interactions.length;
+    const violationInteractions = interactions.filter(interaction => interaction.is_violation).length;
+    return totalInteractions > 0 
+      ? (((totalInteractions - violationInteractions) / totalInteractions) * 100)
+      : 100;
+  }, [selectedWeek, tickets, weeklyData]);
 
   return (
     <div className="space-y-6">
@@ -497,12 +548,7 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({ tickets, employeeSta
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-purple-400 text-sm font-medium">SLA Compliance</p>
-                <p className="text-3xl font-bold text-white mt-1">
-                  {weeklyData.slaViolations === 0 && weeklyData.totalTickets === 0 ? '100.0' : 
-                   weeklyData.totalTickets > 0 ? 
-                   (((weeklyData.totalTickets - weeklyData.slaViolations) / weeklyData.totalTickets) * 100).toFixed(1) : 
-                   '100.0'}%
-                </p>
+                <p className="text-3xl font-bold text-white mt-1">{slaCompliance.toFixed(1)}%</p>
                 <p className="text-purple-300/70 text-xs mt-1">on-time responses</p>
               </div>
               <div className="p-3 bg-purple-500/20 rounded-lg">
@@ -666,10 +712,7 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({ tickets, employeeSta
               <div className="flex justify-between items-center p-3 bg-gray-700/30 rounded-lg">
                 <span className="text-gray-300">SLA Compliance:</span>
                 <span className="text-purple-400 font-semibold">
-                  {weeklyData.slaViolations === 0 && weeklyData.totalTickets === 0 ? '100.0' : 
-                   weeklyData.totalTickets > 0 ? 
-                   (((weeklyData.totalTickets - weeklyData.slaViolations) / weeklyData.totalTickets) * 100).toFixed(1) : 
-                   '100.0'}%
+                  {slaCompliance.toFixed(1)}%
                 </span>
               </div>
             </div>
