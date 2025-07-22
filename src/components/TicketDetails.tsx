@@ -49,7 +49,7 @@ const TicketModal: React.FC<TicketModalProps> = ({ ticketId, ticketData, onClose
         const value = interaction[key as keyof TicketData];
         return typeof value === 'number' ? value : parseFloat(value as string) || 0;
       })
-      .filter(score => !isNaN(score));
+      .filter(score => !isNaN(score) && score > 0); // Exclude N/A (0) values
     
     const coreAverage = coreScores.length > 0 
       ? coreScores.reduce((sum, score) => sum + score, 0) / coreScores.length 
@@ -296,7 +296,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({ tickets }) => {
           const value = interaction[key as keyof TicketData];
           return typeof value === 'number' ? value : parseFloat(value as string) || 0;
         })
-        .filter(score => !isNaN(score));
+        .filter(score => !isNaN(score) && score > 0); // Exclude N/A (0) values
       
       const coreAverage = coreScores.length > 0 
         ? coreScores.reduce((sum, score) => sum + score, 0) / coreScores.length 

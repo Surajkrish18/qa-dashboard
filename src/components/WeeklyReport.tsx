@@ -91,7 +91,7 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({ tickets, employeeSta
         totalTickets: 0,
         uniqueTickets: 0,
         avgScore: 0,
-        slaViolations: 0,
+        slaViolations: violationInteractions, // This is now the actual violation count
         sentimentDistribution: { positive: 0, negative: 0, neutral: 0, mixed: 0 },
         topPerformers: [],
         employeeDetails: [],
@@ -122,16 +122,30 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({ tickets, employeeSta
       return scores.length > 0 ? scores.reduce((sum, score) => sum + score, 0) / scores.length : 0;
     })();
 
-    const slaViolations = DynamoService.calculateSLAViolations(weekTickets).length;
-    
-    // Calculate SLA compliance based on actual interactions (matching SLA Monitoring logic)
+    // Calculate SLA compliance using the exact same method as main dashboard
     const allInteractions: any[] = [];
+    const processedInteractions = new Set<string>();
+    
     weekTickets.forEach(ticket => {
-      if (ticket.response_times && Array.isArray(ticket.response_times)) {
+      if (!ticket.response_times || !Array.isArray(ticket.response_times)) {
+        return;
+      }
+      
+      try {
         const employeeResponses = ticket.response_times.filter(
-          response => response.response_type === 'Employee to Client'
+          response => response && response.response_type === 'Employee to Client'
         );
+        
         employeeResponses.forEach(response => {
+          if (!response || !response.response_by || !response.response_time) {
+            return;
+          }
+          
+          // Create unique key to prevent duplicates
+          const interactionKey = `${ticket.ticket_id}-${response.response_by}-${response.response_time}`;
+          if (processedInteractions.has(interactionKey)) return;
+          processedInteractions.add(interactionKey);
+          
           const responseTime = DynamoService.parseResponseTime(response.response_time);
           allInteractions.push({
             ticket_id: ticket.ticket_id,
@@ -140,14 +154,13 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({ tickets, employeeSta
             is_violation: responseTime > 30
           });
         });
+      } catch (error) {
+        console.warn('Error processing SLA compliance for ticket:', ticket.ticket_id, error);
       }
     });
     
     const totalInteractions = allInteractions.length;
     const violationInteractions = allInteractions.filter(interaction => interaction.is_violation).length;
-    const slaCompliance = totalInteractions > 0 
-      ? (((totalInteractions - violationInteractions) / totalInteractions) * 100)
-      : 100;
 
     const sentimentDistribution = weekTickets.reduce((acc, ticket) => {
       const sentiment = ticket.sentiment?.toLowerCase();
@@ -391,8 +404,9 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({ tickets, employeeSta
 
   const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
-  // Calculate SLA compliance based on actual interactions (matching SLA Monitoring logic)
+  // Calculate SLA compliance using the exact same method as main dashboard
   const allInteractions: any[] = [];
+  const processedInteractions = new Set<string>();
   const weekStart = new Date(selectedWeek);
   const weekEnd = new Date(weekStart);
   weekEnd.setDate(weekStart.getDate() + 6);
@@ -403,11 +417,25 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({ tickets, employeeSta
   });
 
   weekTickets.forEach(ticket => {
-    if (ticket.response_times && Array.isArray(ticket.response_times)) {
+    if (!ticket.response_times || !Array.isArray(ticket.response_times)) {
+      return;
+    }
+    
+    try {
       const employeeResponses = ticket.response_times.filter(
-        response => response.response_type === 'Employee to Client'
+        response => response && response.response_type === 'Employee to Client'
       );
+      
       employeeResponses.forEach(response => {
+        if (!response || !response.response_by || !response.response_time) {
+          return;
+        }
+        
+        // Create unique key to prevent duplicates
+        const interactionKey = `${ticket.ticket_id}-${response.response_by}-${response.response_time}`;
+        if (processedInteractions.has(interactionKey)) return;
+        processedInteractions.add(interactionKey);
+        
         const responseTime = DynamoService.parseResponseTime(response.response_time);
         allInteractions.push({
           ticket_id: ticket.ticket_id,
@@ -416,6 +444,8 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({ tickets, employeeSta
           is_violation: responseTime > 30
         });
       });
+    } catch (error) {
+      console.warn('Error processing SLA compliance for ticket:', ticket.ticket_id, error);
     }
   });
   
