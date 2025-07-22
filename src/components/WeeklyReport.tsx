@@ -84,46 +84,6 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({ tickets, employeeSta
       return ticketDate >= weekStart && ticketDate <= weekEnd;
     });
 
-    // Calculate SLA compliance using the exact same method as main dashboard
-    const allInteractions: any[] = [];
-    const processedInteractions = new Set<string>();
-    
-    weekTickets.forEach(ticket => {
-      if (!ticket.response_times || !Array.isArray(ticket.response_times)) {
-        return;
-      }
-      
-      try {
-        const employeeResponses = ticket.response_times.filter(
-          response => response && response.response_type === 'Employee to Client'
-        );
-        
-        employeeResponses.forEach(response => {
-          if (!response || !response.response_by || !response.response_time) {
-            return;
-          }
-          
-          // Create unique key to prevent duplicates
-          const interactionKey = `${ticket.ticket_id}-${response.response_by}-${response.response_time}`;
-          if (processedInteractions.has(interactionKey)) return;
-          processedInteractions.add(interactionKey);
-          
-          const responseTime = DynamoService.parseResponseTime(response.response_time);
-          allInteractions.push({
-            ticket_id: ticket.ticket_id,
-            employee: response.response_by,
-            response_time: responseTime,
-            is_violation: responseTime > 30
-          });
-        });
-      } catch (error) {
-        console.warn('Error processing SLA compliance for ticket:', ticket.ticket_id, error);
-      }
-    });
-    
-    const totalInteractions = allInteractions.length;
-    const violationInteractions = allInteractions.filter(interaction => interaction.is_violation).length;
-
     if (weekTickets.length === 0) {
       return {
         weekStart: weekStart.toLocaleDateString(),
@@ -140,7 +100,56 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({ tickets, employeeSta
       };
     }
 
-    // Calculate unique tickets for the week
+    // Use the EXACT same SLA calculation as Dashboard component
+    const slaCalculation = (() => {
+      if (weekTickets.length === 0) return { violations: 0, compliance: 100 };
+      
+      const interactions: any[] = [];
+      const processedInteractions = new Set<string>();
+      
+      weekTickets.forEach(ticket => {
+        if (!ticket.response_times || !Array.isArray(ticket.response_times)) {
+          return;
+        }
+        
+        try {
+          const employeeResponses = ticket.response_times.filter(
+            response => response && response.response_type === 'Employee to Client'
+          );
+          
+          employeeResponses.forEach(response => {
+            if (!response || !response.response_by || !response.response_time) {
+              return;
+            }
+            
+            // Create unique key to prevent duplicates
+            const interactionKey = `${ticket.ticket_id}-${response.response_by}-${response.response_time}`;
+            if (processedInteractions.has(interactionKey)) return;
+            processedInteractions.add(interactionKey);
+            
+            const responseTime = DynamoService.parseResponseTime(response.response_time);
+            interactions.push({
+              ticket_id: ticket.ticket_id,
+              employee: response.response_by,
+              response_time: responseTime,
+              is_violation: responseTime > 30
+            });
+          });
+        } catch (error) {
+          console.warn('Error processing SLA compliance for ticket:', ticket.ticket_id, error);
+        }
+      });
+      
+      const totalInteractions = interactions.length;
+      const violationInteractions = interactions.filter(interaction => interaction.is_violation).length;
+      const compliance = totalInteractions > 0 
+        ? (((totalInteractions - violationInteractions) / totalInteractions) * 100)
+        : 100;
+      
+      return { violations: violationInteractions, compliance };
+    })();
+
+    // Calculate unique tickets for the week (count unique ticket IDs)
     const uniqueTickets = new Set(weekTickets.map(ticket => ticket.ticket_id)).size;
 
     // Calculate metrics
@@ -239,68 +248,55 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({ tickets, employeeSta
       };
     }).sort((a, b) => b.avgScore - a.avgScore);
 
-    // Calculate daily metrics
+    // Calculate daily metrics - FIXED to count unique tickets per day
     const dailyTickets = Array(7).fill(0);
     const dailyScores = Array(7).fill(0);
-    const dailyScoreCounts = Array(7).fill(0);
 
-    // Group tickets by creation date (not interaction date)
-    const ticketsByDate = new Map<string, Set<string>>();
-    const scoresByDate = new Map<string, number[]>();
+    // Group by actual creation date and count unique tickets
+    const dailyData = Array(7).fill(null).map(() => ({
+      uniqueTickets: new Set<string>(),
+      scores: [] as number[]
+    }));
     
     weekTickets.forEach(ticket => {
       const ticketDate = new Date(ticket.created_date);
-      const dateKey = ticketDate.toDateString();
+      const dayOfWeek = ticketDate.getDay(); // 0 = Sunday, 1 = Monday, etc.
       
-      // Count unique tickets per day
-      if (!ticketsByDate.has(dateKey)) {
-        ticketsByDate.set(dateKey, new Set());
-      }
-      ticketsByDate.get(dateKey)!.add(ticket.ticket_id);
-      
-      // Collect scores per day
-      const score = DynamoService.calculateOverallScore({
-        tone_and_trust: ticket.tone_and_trust,
-        grammar_language: ticket.grammar_language,
-        professionalism_clarity: ticket.professionalism_clarity,
-        non_tech_clarity: ticket.non_tech_clarity,
-        empathy: ticket.empathy,
-        responsiveness: ticket.responsiveness,
-        client_alignment: ticket.client_alignment,
-        proactivity: ticket.proactivity,
-        ownership_accountability: ticket.ownership_accountability,
-        enablement: ticket.enablement,
-        consistency: ticket.consistency,
-        risk_impact: ticket.risk_impact
-      });
-      
-      if (score > 0) {
-        if (!scoresByDate.has(dateKey)) {
-          scoresByDate.set(dateKey, []);
+      // Only count if the day falls within our week range
+      if (dayOfWeek >= 0 && dayOfWeek <= 6) {
+        dailyData[dayOfWeek].uniqueTickets.add(ticket.ticket_id);
+        
+        // Calculate score for this interaction
+        const score = DynamoService.calculateOverallScore({
+          tone_and_trust: ticket.tone_and_trust,
+          grammar_language: ticket.grammar_language,
+          professionalism_clarity: ticket.professionalism_clarity,
+          non_tech_clarity: ticket.non_tech_clarity,
+          empathy: ticket.empathy,
+          responsiveness: ticket.responsiveness,
+          client_alignment: ticket.client_alignment,
+          proactivity: ticket.proactivity,
+          ownership_accountability: ticket.ownership_accountability,
+          enablement: ticket.enablement,
+          consistency: ticket.consistency,
+          risk_impact: ticket.risk_impact
+        });
+        
+        if (score > 0) {
+          dailyData[dayOfWeek].scores.push(score);
         }
-        scoresByDate.get(dateKey)!.push(score);
       }
     });
     
-    // Map to daily arrays (Sunday = 0, Monday = 1, etc.)
+    // Convert to arrays
     for (let i = 0; i < 7; i++) {
-      const date = new Date(weekStart);
-      date.setDate(weekStart.getDate() + i);
-      const dateKey = date.toDateString();
-      
-      // Count unique tickets for this day
-      const uniqueTicketsForDay = ticketsByDate.get(dateKey);
-      dailyTickets[i] = uniqueTicketsForDay ? uniqueTicketsForDay.size : 0;
-      
-      // Calculate average score for this day
-      const scoresForDay = scoresByDate.get(dateKey);
-      if (scoresForDay && scoresForDay.length > 0) {
-        dailyScores[i] = scoresForDay.reduce((sum, score) => sum + score, 0) / scoresForDay.length;
+      dailyTickets[i] = dailyData[i].uniqueTickets.size;
+      if (dailyData[i].scores.length > 0) {
+        dailyScores[i] = dailyData[i].scores.reduce((sum, score) => sum + score, 0) / dailyData[i].scores.length;
       } else {
         dailyScores[i] = 0;
       }
     }
-
 
     return {
       weekStart: weekStart.toLocaleDateString(),
@@ -308,7 +304,7 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({ tickets, employeeSta
       totalTickets: weekTickets.length,
       uniqueTickets,
       avgScore,
-      slaViolations: violationInteractions,
+      slaViolations: slaCalculation.violations,
       sentimentDistribution,
       topPerformers,
       employeeDetails,
@@ -404,62 +400,11 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({ tickets, employeeSta
 
   const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
-  // Calculate SLA compliance from weeklyData
-  const slaCompliance = (() => {
-    // Get the same week tickets used in weeklyData calculation
-    const weekStart = new Date(selectedWeek);
-    const weekEnd = new Date(weekStart);
-    weekEnd.setDate(weekStart.getDate() + 6);
-    
-    const weekTickets = tickets.filter(ticket => {
-      const ticketDate = new Date(ticket.created_date);
-      return ticketDate >= weekStart && ticketDate <= weekEnd;
-    });
-    
-    if (weekTickets.length === 0) return 100;
-    
-    const interactions: any[] = [];
-    const processedInteractions = new Set<string>();
-    
-    weekTickets.forEach(ticket => {
-      if (!ticket.response_times || !Array.isArray(ticket.response_times)) {
-        return;
-      }
-      
-      try {
-        const employeeResponses = ticket.response_times.filter(
-          response => response && response.response_type === 'Employee to Client'
-        );
-        
-        employeeResponses.forEach(response => {
-          if (!response || !response.response_by || !response.response_time) {
-            return;
-          }
-          
-          // Create unique key to prevent duplicates
-          const interactionKey = `${ticket.ticket_id}-${response.response_by}-${response.response_time}`;
-          if (processedInteractions.has(interactionKey)) return;
-          processedInteractions.add(interactionKey);
-          
-          const responseTime = DynamoService.parseResponseTime(response.response_time);
-          interactions.push({
-            ticket_id: ticket.ticket_id,
-            employee: response.response_by,
-            response_time: responseTime,
-            is_violation: responseTime > 30
-          });
-        });
-      } catch (error) {
-        console.warn('Error processing SLA compliance for ticket:', ticket.ticket_id, error);
-      }
-    });
-    
-    const totalInteractions = interactions.length;
-    const violationInteractions = interactions.filter(interaction => interaction.is_violation).length;
-    return totalInteractions > 0 
-      ? (((totalInteractions - violationInteractions) / totalInteractions) * 100)
-      : 100;
-  })();
+  // Get SLA compliance directly from weeklyData
+  const slaCompliance = weeklyData ? 
+    (weeklyData.totalTickets > 0 ? 
+      (((weeklyData.totalTickets - weeklyData.slaViolations) / weeklyData.totalTickets) * 100) : 100) 
+    : 100;
 
   return (
     <div className="space-y-6">
@@ -498,93 +443,120 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({ tickets, employeeSta
         </div>
 
         {/* Week Summary */}
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
-          <div className="bg-blue-500/10 rounded-lg p-4 border border-blue-500/20">
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
+          <div className="bg-gradient-to-br from-blue-500/10 to-blue-600/5 rounded-xl p-6 border border-blue-500/20 hover:border-blue-400/30 transition-all duration-300 shadow-lg hover:shadow-blue-500/10">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-blue-400 text-sm">Total Tickets</p>
-                <p className="text-2xl font-bold text-white">{weeklyData.totalTickets}</p>
+                <p className="text-blue-400 text-sm font-medium">Total Tickets</p>
+                <p className="text-3xl font-bold text-white mt-1">{weeklyData.totalTickets}</p>
+                <p className="text-blue-300/70 text-xs mt-1">interactions this week</p>
               </div>
-              <div className="text-blue-400">
-                <Sparkline data={weeklyData.dailyTickets} color="#3B82F6" showTrend={false} />
+              <div className="flex flex-col items-end">
+                <div className="p-3 bg-blue-500/20 rounded-lg mb-2">
+                  <TrendingUp className="h-6 w-6 text-blue-400" />
+                </div>
+                <div className="text-blue-400">
+                  <Sparkline data={weeklyData.dailyTickets} color="#3B82F6" showTrend={false} height={20} width={60} />
+                </div>
               </div>
             </div>
           </div>
           
-          <div className="bg-green-500/10 rounded-lg p-4 border border-green-500/20">
+          <div className="bg-gradient-to-br from-green-500/10 to-green-600/5 rounded-xl p-6 border border-green-500/20 hover:border-green-400/30 transition-all duration-300 shadow-lg hover:shadow-green-500/10">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-green-400 text-sm">Avg QA Score</p>
-                <p className="text-2xl font-bold text-white">{weeklyData.avgScore.toFixed(1)}</p>
+                <p className="text-green-400 text-sm font-medium">Avg QA Score</p>
+                <p className="text-3xl font-bold text-white mt-1">{weeklyData.avgScore.toFixed(1)}</p>
+                <p className="text-green-300/70 text-xs mt-1">quality rating</p>
               </div>
-              <div className="text-green-400">
-                <Sparkline data={weeklyData.dailyScores.filter(score => score > 0)} color="#10B981" showTrend={false} />
+              <div className="flex flex-col items-end">
+                <div className="p-3 bg-green-500/20 rounded-lg mb-2">
+                  <Target className="h-6 w-6 text-green-400" />
+                </div>
+                <div className="text-green-400">
+                  <Sparkline data={weeklyData.dailyScores.filter(score => score > 0)} color="#10B981" showTrend={false} height={20} width={60} />
+                </div>
               </div>
             </div>
           </div>
           
-          <div className="bg-red-500/10 rounded-lg p-4 border border-red-500/20">
+          <div className="bg-gradient-to-br from-red-500/10 to-red-600/5 rounded-xl p-6 border border-red-500/20 hover:border-red-400/30 transition-all duration-300 shadow-lg hover:shadow-red-500/10">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-red-400 text-sm">SLA Violations</p>
-                <p className="text-2xl font-bold text-white">{weeklyData.slaViolations}</p>
+                <p className="text-red-400 text-sm font-medium">SLA Violations</p>
+                <p className="text-3xl font-bold text-white mt-1">{weeklyData.slaViolations}</p>
+                <p className="text-red-300/70 text-xs mt-1">response delays</p>
               </div>
-              <AlertTriangle className="h-8 w-8 text-red-400" />
+              <div className="p-3 bg-red-500/20 rounded-lg">
+                <AlertTriangle className="h-6 w-6 text-red-400" />
+              </div>
             </div>
           </div>
           
-          <div className="bg-purple-500/10 rounded-lg p-4 border border-purple-500/20">
+          <div className="bg-gradient-to-br from-purple-500/10 to-purple-600/5 rounded-xl p-6 border border-purple-500/20 hover:border-purple-400/30 transition-all duration-300 shadow-lg hover:shadow-purple-500/10">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-purple-400 text-sm">SLA Compliance</p>
-                <p className="text-2xl font-bold text-white">
-                  {slaCompliance.toFixed(1)}%
+                <p className="text-purple-400 text-sm font-medium">SLA Compliance</p>
+                <p className="text-3xl font-bold text-white mt-1">
+                  {weeklyData.slaViolations === 0 && weeklyData.totalTickets === 0 ? '100.0' : 
+                   weeklyData.totalTickets > 0 ? 
+                   (((weeklyData.totalTickets - weeklyData.slaViolations) / weeklyData.totalTickets) * 100).toFixed(1) : 
+                   '100.0'}%
                 </p>
+                <p className="text-purple-300/70 text-xs mt-1">on-time responses</p>
               </div>
-              <Target className="h-8 w-8 text-purple-400" />
+              <div className="p-3 bg-purple-500/20 rounded-lg">
+                <Target className="h-6 w-6 text-purple-400" />
+              </div>
             </div>
           </div>
         </div>
 
         {/* Daily Breakdown */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-8">
           {/* Daily Tickets */}
-          <div className="bg-gray-700/50 rounded-lg p-4">
-            <h4 className="font-medium text-white mb-3">Daily Ticket Volume</h4>
-            <div className="space-y-2">
+          <div className="bg-gradient-to-br from-gray-800/80 to-gray-900/40 rounded-xl p-6 border border-gray-600/50 shadow-xl">
+            <h4 className="font-semibold text-white mb-4 flex items-center">
+              <div className="w-2 h-2 bg-blue-500 rounded-full mr-3"></div>
+              Daily Ticket Volume
+            </h4>
+            <div className="space-y-3">
               {dayNames.map((day, index) => (
-                <div key={day} className="flex items-center justify-between">
-                  <span className="text-gray-300 text-sm w-12">{day}</span>
-                  <div className="flex-1 mx-3">
-                    <div className="w-full bg-gray-600 rounded-full h-2">
+                <div key={day} className="flex items-center justify-between group hover:bg-gray-700/30 rounded-lg p-2 transition-all duration-200">
+                  <span className="text-gray-300 text-sm w-12 font-medium">{day}</span>
+                  <div className="flex-1 mx-4">
+                    <div className="w-full bg-gray-600/50 rounded-full h-3 overflow-hidden">
                       <div 
-                        className="bg-blue-500 h-2 rounded-full transition-all"
+                        className="bg-gradient-to-r from-blue-500 to-blue-400 h-3 rounded-full transition-all duration-500 ease-out"
                         style={{ width: `${weeklyData.totalTickets > 0 ? (weeklyData.dailyTickets[index] / Math.max(...weeklyData.dailyTickets)) * 100 : 0}%` }}
                       />
                     </div>
                   </div>
-                  <span className="text-white text-sm w-8 text-right">{weeklyData.dailyTickets[index]}</span>
+                  <span className="text-white text-sm w-8 text-right font-semibold">{weeklyData.dailyTickets[index]}</span>
                 </div>
               ))}
             </div>
           </div>
 
           {/* Daily Scores */}
-          <div className="bg-gray-700/50 rounded-lg p-4">
-            <h4 className="font-medium text-white mb-3">Daily Average Scores</h4>
-            <div className="space-y-2">
+          <div className="bg-gradient-to-br from-gray-800/80 to-gray-900/40 rounded-xl p-6 border border-gray-600/50 shadow-xl">
+            <h4 className="font-semibold text-white mb-4 flex items-center">
+              <div className="w-2 h-2 bg-green-500 rounded-full mr-3"></div>
+              Daily Average Scores
+            </h4>
+            <div className="space-y-3">
               {dayNames.map((day, index) => (
-                <div key={day} className="flex items-center justify-between">
-                  <span className="text-gray-300 text-sm w-12">{day}</span>
-                  <div className="flex-1 mx-3">
-                    <div className="w-full bg-gray-600 rounded-full h-2">
+                <div key={day} className="flex items-center justify-between group hover:bg-gray-700/30 rounded-lg p-2 transition-all duration-200">
+                  <span className="text-gray-300 text-sm w-12 font-medium">{day}</span>
+                  <div className="flex-1 mx-4">
+                    <div className="w-full bg-gray-600/50 rounded-full h-3 overflow-hidden">
                       <div 
-                        className="bg-green-500 h-2 rounded-full transition-all"
+                        className="bg-gradient-to-r from-green-500 to-green-400 h-3 rounded-full transition-all duration-500 ease-out"
                         style={{ width: `${weeklyData.dailyScores[index] > 0 ? (weeklyData.dailyScores[index] / 10) * 100 : 0}%` }}
                       />
                     </div>
                   </div>
-                  <span className="text-white text-sm w-12 text-right">
+                  <span className="text-white text-sm w-12 text-right font-semibold">
                     {weeklyData.dailyScores[index] > 0 ? weeklyData.dailyScores[index].toFixed(1) : 'N/A'}
                   </span>
                 </div>
@@ -595,27 +567,30 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({ tickets, employeeSta
 
         {/* Top Performers */}
         {weeklyData.topPerformers.length > 0 && (
-          <div className="mt-6 bg-gray-700/50 rounded-lg p-4">
-            <h4 className="font-medium text-white mb-3 flex items-center">
-              <Users className="h-4 w-4 mr-2 text-yellow-400" />
+          <div className="mb-8 bg-gradient-to-br from-gray-800/80 to-gray-900/40 rounded-xl p-6 border border-gray-600/50 shadow-xl">
+            <h4 className="font-semibold text-white mb-4 flex items-center">
+              <div className="w-2 h-2 bg-yellow-500 rounded-full mr-3"></div>
               Top Performers This Week
             </h4>
-            <div className="space-y-2">
+            <div className="space-y-3">
               {weeklyData.topPerformers.map((performer, index) => (
-                <div key={performer.employee} className="flex items-center justify-between p-2 bg-gray-600/50 rounded">
+                <div key={performer.employee} className="flex items-center justify-between p-4 bg-gradient-to-r from-gray-700/50 to-gray-800/30 rounded-lg border border-gray-600/30 hover:border-gray-500/50 transition-all duration-300">
                   <div className="flex items-center space-x-3">
-                    <div className={`w-6 h-6 rounded-full flex items-center justify-center text-white text-xs font-bold ${
-                      index === 0 ? 'bg-yellow-500' : 
-                      index === 1 ? 'bg-gray-400' : 
-                      index === 2 ? 'bg-orange-500' : 'bg-gray-600'
+                    <div className={`w-8 h-8 rounded-full flex items-center justify-center text-white text-sm font-bold shadow-lg ${
+                      index === 0 ? 'bg-gradient-to-br from-yellow-400 to-yellow-600' : 
+                      index === 1 ? 'bg-gradient-to-br from-gray-300 to-gray-500' : 
+                      index === 2 ? 'bg-gradient-to-br from-orange-400 to-orange-600' : 'bg-gradient-to-br from-gray-500 to-gray-700'
                     }`}>
                       {index + 1}
                     </div>
-                    <span className="text-white font-medium">{performer.employee}</span>
+                    <div>
+                      <span className="text-white font-semibold">{performer.employee}</span>
+                      <div className="text-gray-400 text-xs">{performer.tickets} tickets handled</div>
+                    </div>
                   </div>
-                  <div className="flex items-center space-x-4">
-                    <span className="text-gray-400 text-sm">{performer.tickets} tickets</span>
-                    <span className="text-green-400 font-bold">{performer.score.toFixed(1)}</span>
+                  <div className="text-right">
+                    <div className="text-green-400 font-bold text-lg">{performer.score.toFixed(1)}</div>
+                    <div className="text-gray-400 text-xs">avg score</div>
                   </div>
                 </div>
               ))}
@@ -624,20 +599,23 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({ tickets, employeeSta
         )}
 
         {/* Sentiment Distribution */}
-        <div className="mt-6 grid grid-cols-1 lg:grid-cols-2 gap-6">
-          <div className="bg-gray-700/50 rounded-lg p-4">
-            <h4 className="font-medium text-white mb-3">Sentiment Distribution</h4>
-            <div className="grid grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-8">
+          <div className="bg-gradient-to-br from-gray-800/80 to-gray-900/40 rounded-xl p-6 border border-gray-600/50 shadow-xl">
+            <h4 className="font-semibold text-white mb-4 flex items-center">
+              <div className="w-2 h-2 bg-pink-500 rounded-full mr-3"></div>
+              Sentiment Distribution
+            </h4>
+            <div className="grid grid-cols-2 gap-6">
               {Object.entries(weeklyData.sentimentDistribution).map(([sentiment, count]) => (
-                <div key={sentiment} className="text-center">
-                  <div className={`w-3 h-3 rounded-full mx-auto mb-2 ${
+                <div key={sentiment} className="text-center p-4 bg-gray-700/30 rounded-lg border border-gray-600/30 hover:border-gray-500/50 transition-all duration-300">
+                  <div className={`w-4 h-4 rounded-full mx-auto mb-3 shadow-lg ${
                     sentiment === 'positive' ? 'bg-green-500' :
                     sentiment === 'negative' ? 'bg-red-500' :
                     sentiment === 'neutral' ? 'bg-gray-500' : 'bg-yellow-500'
                   }`} />
-                  <div className="text-white font-medium">{count}</div>
-                  <div className="text-gray-400 text-sm capitalize">{sentiment}</div>
-                  <div className="text-gray-400 text-xs">
+                  <div className="text-white font-bold text-xl mb-1">{count}</div>
+                  <div className="text-gray-300 text-sm capitalize font-medium mb-1">{sentiment}</div>
+                  <div className="text-gray-400 text-xs font-medium">
                     {weeklyData.totalTickets > 0 ? ((count / weeklyData.totalTickets) * 100).toFixed(1) : '0.0'}%
                   </div>
                 </div>
@@ -646,46 +624,52 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({ tickets, employeeSta
           </div>
 
           {/* Week Summary Stats */}
-          <div className="bg-gray-700/50 rounded-lg p-4">
-            <h4 className="font-medium text-white mb-3">Week Summary</h4>
-            <div className="space-y-3">
-              <div className="flex justify-between">
+          <div className="bg-gradient-to-br from-gray-800/80 to-gray-900/40 rounded-xl p-6 border border-gray-600/50 shadow-xl">
+            <h4 className="font-semibold text-white mb-4 flex items-center">
+              <div className="w-2 h-2 bg-blue-500 rounded-full mr-3"></div>
+              Week Summary
+            </h4>
+            <div className="space-y-4">
+              <div className="flex justify-between items-center p-3 bg-gray-700/30 rounded-lg">
                 <span className="text-gray-300">Unique Tickets:</span>
-                <span className="text-white font-medium">
+                <span className="text-white font-semibold">
                   {weeklyData.uniqueTickets}
                 </span>
               </div>
-              <div className="flex justify-between">
+              <div className="flex justify-between items-center p-3 bg-gray-700/30 rounded-lg">
                 <span className="text-gray-300">Total Tickets:</span>
-                <span className="text-white font-medium">
+                <span className="text-white font-semibold">
                   {weeklyData.totalTickets}
                 </span>
               </div>
-              <div className="flex justify-between">
+              <div className="flex justify-between items-center p-3 bg-gray-700/30 rounded-lg">
                 <span className="text-gray-300">Active Employees:</span>
-                <span className="text-white font-medium">
+                <span className="text-white font-semibold">
                   {weeklyData.employeeDetails.length}
                 </span>
               </div>
-              <div className="flex justify-between">
+              <div className="flex justify-between items-center p-3 bg-gray-700/30 rounded-lg">
                 <span className="text-gray-300">Avg Interactions/Employee:</span>
-                <span className="text-white font-medium">
+                <span className="text-white font-semibold">
                   {weeklyData.employeeDetails.length > 0 
                     ? (weeklyData.totalTickets / weeklyData.employeeDetails.length).toFixed(1)
                     : '0.0'
                   }
                 </span>
               </div>
-              <div className="flex justify-between">
+              <div className="flex justify-between items-center p-3 bg-gray-700/30 rounded-lg">
                 <span className="text-gray-300">Best Performer:</span>
-                <span className="text-green-400 font-medium">
+                <span className="text-green-400 font-semibold">
                   {weeklyData.topPerformers[0]?.employee || 'N/A'}
                 </span>
               </div>
-              <div className="flex justify-between">
+              <div className="flex justify-between items-center p-3 bg-gray-700/30 rounded-lg">
                 <span className="text-gray-300">SLA Compliance:</span>
-                <span className="text-purple-400 font-medium">
-                  {slaCompliance.toFixed(1)}%
+                <span className="text-purple-400 font-semibold">
+                  {weeklyData.slaViolations === 0 && weeklyData.totalTickets === 0 ? '100.0' : 
+                   weeklyData.totalTickets > 0 ? 
+                   (((weeklyData.totalTickets - weeklyData.slaViolations) / weeklyData.totalTickets) * 100).toFixed(1) : 
+                   '100.0'}%
                 </span>
               </div>
             </div>
