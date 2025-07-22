@@ -338,7 +338,14 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({ tickets }) => {
         </h3>
         
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {Object.entries(groupedTickets).map(([ticketId, ticketData]) => {
+          {Object.entries(groupedTickets)
+            .sort(([, ticketDataA], [, ticketDataB]) => {
+              // Sort by earliest created_date in each ticket group
+              const dateA = new Date(ticketDataA[0]?.created_date || 0);
+              const dateB = new Date(ticketDataB[0]?.created_date || 0);
+              return dateB.getTime() - dateA.getTime(); // Most recent first
+            })
+            .map(([ticketId, ticketData]) => {
             const avgScore = calculateTicketAvgScore(ticketData);
 
             return (

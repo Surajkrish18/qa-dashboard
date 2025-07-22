@@ -231,11 +231,21 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({ tickets, employeeSta
     const dailyScores = Array(7).fill(0);
     const dailyScoreCounts = Array(7).fill(0);
 
+    // Group tickets by creation date (not interaction date)
+    const ticketsByDate = new Map<string, Set<string>>();
+    const scoresByDate = new Map<string, number[]>();
+    
     weekTickets.forEach(ticket => {
       const ticketDate = new Date(ticket.created_date);
-      const dayIndex = ticketDate.getDay(); // 0 = Sunday, 1 = Monday, etc.
-      dailyTickets[dayIndex]++;
+      const dateKey = ticketDate.toDateString();
       
+      // Count unique tickets per day
+      if (!ticketsByDate.has(dateKey)) {
+        ticketsByDate.set(dateKey, new Set());
+      }
+      ticketsByDate.get(dateKey)!.add(ticket.ticket_id);
+      
+      // Collect scores per day
       const score = DynamoService.calculateOverallScore({
         tone_and_trust: ticket.tone_and_trust,
         grammar_language: ticket.grammar_language,
@@ -252,17 +262,32 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({ tickets, employeeSta
       });
       
       if (score > 0) {
-        dailyScores[dayIndex] += score;
-        dailyScoreCounts[dayIndex]++;
+        if (!scoresByDate.has(dateKey)) {
+          scoresByDate.set(dateKey, []);
+        }
+        scoresByDate.get(dateKey)!.push(score);
       }
     });
-
-    // Calculate average scores per day
+    
+    // Map to daily arrays (Sunday = 0, Monday = 1, etc.)
     for (let i = 0; i < 7; i++) {
-      if (dailyScoreCounts[i] > 0) {
-        dailyScores[i] = dailyScores[i] / dailyScoreCounts[i];
+      const date = new Date(weekStart);
+      date.setDate(weekStart.getDate() + i);
+      const dateKey = date.toDateString();
+      
+      // Count unique tickets for this day
+      const uniqueTicketsForDay = ticketsByDate.get(dateKey);
+      dailyTickets[i] = uniqueTicketsForDay ? uniqueTicketsForDay.size : 0;
+      
+      // Calculate average score for this day
+      const scoresForDay = scoresByDate.get(dateKey);
+      if (scoresForDay && scoresForDay.length > 0) {
+        dailyScores[i] = scoresForDay.reduce((sum, score) => sum + score, 0) / scoresForDay.length;
+      } else {
+        dailyScores[i] = 0;
       }
     }
+
 
     return {
       weekStart: weekStart.toLocaleDateString(),
@@ -290,9 +315,10 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({ tickets, employeeSta
       ['Weekly Report Summary', ''],
       ['Week Period', `${weeklyData.weekStart} - ${weeklyData.weekEnd}`],
       ['Total Tickets', weeklyData.totalTickets],
+      ['Unique Tickets', weeklyData.uniqueTickets],
       ['Average QA Score', weeklyData.avgScore.toFixed(2)],
       ['SLA Violations', weeklyData.slaViolations],
-      ['SLA Compliance', `${weeklyData.totalTickets > 0 ? (((weeklyData.totalTickets - weeklyData.slaViolations) / weeklyData.totalTickets) * 100).toFixed(1) : '0.0'}%`],
+      ['SLA Compliance', `${slaCompliance.toFixed(1)}%`],
       [''],
       ['Daily Breakdown', ''],
       ['Day', 'Tickets', 'Avg Score'],
@@ -440,8 +466,8 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({ tickets, employeeSta
           <div className="bg-blue-500/10 rounded-lg p-4 border border-blue-500/20">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-blue-400 text-sm">Unique Tickets</p>
-                <p className="text-2xl font-bold text-white">{weeklyData.uniqueTickets}</p>
+                <p className="text-blue-400 text-sm">Total Tickets</p>
+                <p className="text-2xl font-bold text-white">{weeklyData.totalTickets}</p>
               </div>
               <div className="text-blue-400">
                 <Sparkline data={weeklyData.dailyTickets} color="#3B82F6" showTrend={false} />
@@ -591,6 +617,12 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({ tickets, employeeSta
                 <span className="text-gray-300">Unique Tickets:</span>
                 <span className="text-white font-medium">
                   {weeklyData.uniqueTickets}
+                </span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-gray-300">Total Tickets:</span>
+                <span className="text-white font-medium">
+                  {weeklyData.totalTickets}
                 </span>
               </div>
               <div className="flex justify-between">
