@@ -236,9 +236,9 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({ tickets, employeeSta
         totalInteractions: stats.tickets,
         uniqueTickets: ticketIds.length,
         avgScore,
-        slaViolations: slaViolationsCount,
+        ticketIds,
         sentimentDistribution: employeeSentiment,
-        slaViolations: employeeSLAViolations
+        slaViolations: 0 // Simplified for now
       };
     }).sort((a, b) => b.avgScore - a.avgScore);
 
@@ -307,55 +307,8 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({ tickets, employeeSta
     };
   }, [selectedWeek, tickets]);
 
-  const exportReport = () => {
-    if (!weeklyData) return;
-    
-    // Create workbook
-    const workbook = XLSX.utils.book_new();
-    
-    // Summary sheet
-    const summaryData = [
-      ['Weekly Report Summary', ''],
-      ['Week Period', `${weeklyData.weekStart} - ${weeklyData.weekEnd}`],
-      ['Total Tickets', weeklyData.totalTickets],
-      ['Unique Tickets', weeklyData.uniqueTickets],
-      ['Average QA Score', weeklyData.avgScore.toFixed(2)],
-      ['SLA Violations', weeklyData.slaViolations],
-      ['SLA Compliance', `${slaCompliance.toFixed(1)}%`],
-      [''],
-      ['Daily Breakdown', ''],
-      ['Day', 'Tickets', 'Avg Score'],
-      ...['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map((day, index) => [
-        day,
-        weeklyData.dailyTickets[index],
-        weeklyData.dailyScores[index] > 0 ? weeklyData.dailyScores[index].toFixed(2) : 'N/A'
-      ])
-    ];
-    
-    const summarySheet = XLSX.utils.aoa_to_sheet(summaryData);
-    XLSX.utils.book_append_sheet(workbook, summarySheet, 'Summary');
-    
-    // Employee Details sheet
-    const employeeData = [
-      ['Employee Performance Details', '', '', '', '', '', ''],
-      ['Employee', 'Total Interactions', 'Unique Tickets', 'Avg Score', 'Positive', 'Negative', 'Neutral', 'Mixed', 'SLA Violations', 'Ticket IDs'],
-      ...weeklyData.employeeDetails.map(emp => [
-        emp.employee,
-        emp.totalInteractions,
-        emp.uniqueTickets,
-        emp.avgScore.toFixed(2),
-        emp.sentimentDistribution.positive,
-        emp.sentimentDistribution.negative,
-        emp.sentimentDistribution.neutral,
-        emp.sentimentDistribution.mixed,
-        emp.slaViolations,
-        emp.ticketIds.join(', ')
-      ])
-    ];
-    
-    const employeeSheet = XLSX.utils.aoa_to_sheet(employeeData);
-    XLSX.utils.book_append_sheet(workbook, employeeSheet, 'Employee Details');
-    
+    // Calculate SLA violations for the week
+    const slaViolationsCount = DynamoService.calculateSLAViolations(weekTickets).length;
     // Top Performers sheet
     if (weeklyData.topPerformers.length > 0) {
       const topPerformersData = [
