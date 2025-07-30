@@ -307,8 +307,63 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({ tickets, employeeSta
     };
   }, [selectedWeek, tickets]);
 
-    // Calculate SLA violations for the week
-    const slaViolationsCount = DynamoService.calculateSLAViolations(weekTickets).length;
+  const exportReport = () => {
+    if (!weeklyData) return;
+
+    const workbook = XLSX.utils.book_new();
+
+    // Summary sheet
+    const summaryData = [
+      ['Weekly Report Summary', '', ''],
+      ['Week Period', `${weeklyData.weekStart} - ${weeklyData.weekEnd}`, ''],
+      ['', '', ''],
+      ['Metric', 'Value', 'Notes'],
+      ['Total Tickets', weeklyData.totalTickets, 'All interactions'],
+      ['Unique Tickets', weeklyData.uniqueTickets, 'Distinct ticket IDs'],
+      ['Average QA Score', weeklyData.avgScore.toFixed(2), 'Out of 10'],
+      ['SLA Violations', weeklyData.slaViolations, 'Response time > 30min'],
+      ['', '', ''],
+      ['Sentiment Distribution', '', ''],
+      ['Positive', weeklyData.sentimentDistribution.positive, ''],
+      ['Negative', weeklyData.sentimentDistribution.negative, ''],
+      ['Neutral', weeklyData.sentimentDistribution.neutral, ''],
+      ['Mixed', weeklyData.sentimentDistribution.mixed, ''],
+      ['', '', ''],
+      ['Daily Breakdown', '', ''],
+      ['Day', 'Tickets', 'Avg Score'],
+      ['Sunday', weeklyData.dailyTickets[0], weeklyData.dailyScores[0].toFixed(2)],
+      ['Monday', weeklyData.dailyTickets[1], weeklyData.dailyScores[1].toFixed(2)],
+      ['Tuesday', weeklyData.dailyTickets[2], weeklyData.dailyScores[2].toFixed(2)],
+      ['Wednesday', weeklyData.dailyTickets[3], weeklyData.dailyScores[3].toFixed(2)],
+      ['Thursday', weeklyData.dailyTickets[4], weeklyData.dailyScores[4].toFixed(2)],
+      ['Friday', weeklyData.dailyTickets[5], weeklyData.dailyScores[5].toFixed(2)],
+      ['Saturday', weeklyData.dailyTickets[6], weeklyData.dailyScores[6].toFixed(2)]
+    ];
+
+    const summarySheet = XLSX.utils.aoa_to_sheet(summaryData);
+    XLSX.utils.book_append_sheet(workbook, summarySheet, 'Summary');
+
+    // Employee Details sheet
+    const employeeData = [
+      ['Employee Performance Details', '', '', '', '', '', '', '', '', ''],
+      ['Employee', 'Total Interactions', 'Unique Tickets', 'Avg Score', 'Positive', 'Negative', 'Neutral', 'Mixed', 'SLA Violations', 'Ticket IDs'],
+      ...weeklyData.employeeDetails.map(emp => [
+        emp.employee,
+        emp.totalInteractions,
+        emp.uniqueTickets,
+        emp.avgScore.toFixed(2),
+        emp.sentimentDistribution.positive,
+        emp.sentimentDistribution.negative,
+        emp.sentimentDistribution.neutral,
+        emp.sentimentDistribution.mixed,
+        emp.slaViolations,
+        emp.ticketIds ? emp.ticketIds.join(', ') : ''
+      ])
+    ];
+
+    const employeeSheet = XLSX.utils.aoa_to_sheet(employeeData);
+    XLSX.utils.book_append_sheet(workbook, employeeSheet, 'Employee Details');
+
     // Top Performers sheet
     if (weeklyData.topPerformers.length > 0) {
       const topPerformersData = [
