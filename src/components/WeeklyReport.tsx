@@ -142,7 +142,7 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({ tickets, employeeSta
       
       const totalInteractions = interactions.length;
       const violationInteractions = interactions.filter(interaction => interaction.is_violation).length;
-      return violationInteractions;
+      const compliance = totalInteractions > 0 
         ? (((totalInteractions - violationInteractions) / totalInteractions) * 100)
         : 100;
       
