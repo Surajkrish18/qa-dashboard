@@ -529,7 +529,7 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({ tickets, employeeSta
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-red-400 text-sm font-medium">SLA Violations</p>
-                <p className="text-3xl font-bold text-white mt-1">{weeklyData.slaViolations}</p>
+                <p className="text-3xl font-bold text-white mt-1">{weeklyData.slaViolations || 0}</p>
                 <p className="text-red-300/70 text-xs mt-1">response delays</p>
               </div>
               <div className="p-3 bg-red-500/20 rounded-lg">
