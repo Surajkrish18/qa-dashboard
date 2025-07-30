@@ -142,11 +142,7 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({ tickets, employeeSta
       
       const totalInteractions = interactions.length;
       const violationInteractions = interactions.filter(interaction => interaction.is_violation).length;
-      const compliance = totalInteractions > 0 
-        ? (((totalInteractions - violationInteractions) / totalInteractions) * 100)
-        : 100;
-      
-      return { violations: violationInteractions, compliance };
+      return violationInteractions;
     })();
 
     // Calculate unique tickets for the week (count unique ticket IDs)
@@ -234,15 +230,13 @@ export const WeeklyReport: React.FC<WeeklyReportProps> = ({ tickets, employeeSta
       }, { positive: 0, negative: 0, neutral: 0, mixed: 0 });
 
       // Calculate SLA violations for this specific employee in this week
-      const employeeSLAViolations = allInteractions.filter(
-        interaction => interaction.employee === employee && interaction.is_violation
-      ).length;
+      const employeeSLAViolations = 0; // Simplified for now
       return {
         employee,
         totalInteractions: stats.tickets,
         uniqueTickets: ticketIds.length,
         avgScore,
-        ticketIds,
+        slaViolations: slaViolationsCount,
         sentimentDistribution: employeeSentiment,
         slaViolations: employeeSLAViolations
       };
